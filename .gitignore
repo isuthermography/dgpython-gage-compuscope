@@ -1,0 +1,6 @@
+*~
+*.bak
+build/
+__pycache__
+*.pyc
+dgpython_gage_compuscope/cs.c
