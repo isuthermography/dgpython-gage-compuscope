@@ -1,14 +1,20 @@
 import sys
 import os
 import numpy as np
+import signal
 
 from limatix.dc_value import numericunitsvalue as nuv
 
+
+# Receiving signals makes CompuScope library malfunction, so block them from the thread for this Module
+signal.pthread_sigmask(signal.SIG_BLOCK,(signal.SIGFPE,signal.SIGCHLD))
 
 # Temporary hack until all needed symbols are in a separate dll...
 sys.setdlopenflags(os.RTLD_GLOBAL|os.RTLD_NOW)
 
 from dataguzzler_python import pydg
+from dataguzzler_python.pydg import u
+
 
 from dataguzzler_python import dgold
 from dataguzzler_python.dgold import cmd as dgcmd
@@ -39,8 +45,8 @@ AUTH=dgold.DGModule("AUTH","auth.so",r"""
 stdmathinit=open("/usr/local/dataguzzler/conf/m4/stdinit.pymathm4","r").read()
 stdmathfunc=open("/usr/local/dataguzzler/conf/m4/stdfunc.pymathm4","r").read()
 
-MATH=dgold.DGModule("MATH","wfmmath.so",r""" 
-  numthreads = 4 # -1 would mean use number of CPU's + 1 
+#MATH=dgold.DGModule("MATH","wfmmath.so",r""" 
+"""  numthreads = 4 # -1 would mean use number of CPU's + 1 
   #debugmode=true
  
   pymath {
@@ -51,7 +57,9 @@ MATH=dgold.DGModule("MATH","wfmmath.so",r"""
     # (can add custom math functions here)
   }
 
-""" % (stdmathinit,stdmathfunc))
+"""
+#""" % (stdmathinit,stdmathfunc))
+
 
 CS=CompuScope(0,0,0,0)
 

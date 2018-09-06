@@ -6,14 +6,17 @@ from threading import Thread
 
 from dataguzzler_python.pydg import Module as pydg_Module
 from dataguzzler_python.pydg import CurContext
+from dataguzzler_python.pydg import RunInContext
 from dataguzzler_python.pydg import u # PINT unit registry
 from dataguzzler_python cimport dgold
 from dataguzzler_python cimport wfmstore
 from dataguzzler_python cimport dg_internal
 
 
-import gageconstants as gc
+from . import gageconstants as gc
 #import pint # units library
+
+from libc.stdio cimport fprintf,stderr
 
 from libc.stdint cimport uint64_t
 from libc.stdint cimport int64_t
@@ -112,7 +115,7 @@ CSACQUISITIONCONFIG = np.dtype([
     ("TriggerHoldoff",np.int64),
     ("SampleOffset",np.int32),
     ("TimeStampConfig",np.uint32),
-    ("SegmentCountHigh",np.int32)])
+    ("SegmentCountHigh",np.int32)],align=True)
 
 CSCHANNELCONFIG = np.dtype([
     ("Size",np.uint32),
@@ -122,7 +125,7 @@ CSCHANNELCONFIG = np.dtype([
     ("Impedance",np.uint32),
     ("Filter",np.uint32),
     ("DcOffset",np.int32),
-    ("Calib",np.int32)])
+    ("Calib",np.int32)],align=True)
 
 CSTRIGGERCONFIG = np.dtype([
     ("Size",np.uint32),
@@ -136,7 +139,7 @@ CSTRIGGERCONFIG = np.dtype([
     ("Value1",np.int32),
     ("Value2",np.int32),
     ("Filter",np.uint32),
-    ("Relation", np.uint32)])
+    ("Relation", np.uint32)],align=True)
 
 
 
@@ -145,13 +148,13 @@ CSTRIGGERCONFIG = np.dtype([
 # a few of these are defined, but you can add more if needed!
 
 CSSAMPLERATETABLE = np.dtype([ ("SampleRate",np.int64),
-                               ("strText",'a32')])
+                               ("strText",'a32')],align=True)
 CSRANGETABLE = np.dtype([("InputRange",np.uint32),
                          ("strText",'a32'),
-                         ("Reserved",np.uint32)])
+                         ("Reserved",np.uint32)],align=True)
 CSIMPEDANCETABLE = np.dtype([("Impedance",np.uint32),
                              ("strText",'a32'),
-                             ("Reserved",np.uint32)])
+                             ("Reserved",np.uint32)],align=True)
 
 
 syscaps_type_map = {
@@ -170,7 +173,8 @@ class CSError(Exception):
             err=CsGetErrorStringA(errcode,buf.data,bufsz)
             if err > 0:
                 # Got an error string
-                errcodestr=buf.tostring().decode('utf-8')
+                buflen=(~buf.astype(np.bool)).nonzero()[0][0]
+                errcodestr=buf[:buflen].tostring().decode('utf-8')
                 pass
             else: 
                 errcodestr="Error #%d " % (errcode)
@@ -188,21 +192,27 @@ cdef class CSLowLevel:
     cdef int InTransaction
 
     # System hardware information
-    SysInfo=None
+    cdef public object SysInfo
+
+    # ParamDict from cs.py
+    cdef public object ParamDict
+ 
+    cdef public object ARRAY_TRIGGERCONFIG # numpy dtype
+    cdef public object ARRAY_CHANNELCONFIG # numpy dtype
     
     # These variables may be None or contain the latest
     # cached knowledge of the configuration    
-    AcquisitionConfig=None # CSACQUISITIONCONFIG
-    ChannelConfig=None   # ARRAY_CHANNELCONFIG
-    TriggerConfig=None  # ARRAY_TRIGGERCONFIG
+    cdef public object AcquisitionConfig # CSACQUISITIONCONFIG
+    cdef public object ChannelConfig   # ARRAY_CHANNELCONFIG
+    cdef public object TriggerConfig  # ARRAY_TRIGGERCONFIG
     
     # These variables only valid during a (config) transction 
-    cdef np.ndarray AcquisitionConfig_modified  # CSACQUISITIONCONFIG
-    cdef np.ndarray ChannelConfig_modified    # ARRAY_CHANNELCONFIG
-    cdef np.ndarray TriggerConfig_modified   # ARRAY_TRIGGERCONFIG
+    cdef public np.ndarray AcquisitionConfig_modified  # CSACQUISITIONCONFIG
+    cdef public np.ndarray ChannelConfig_modified    # ARRAY_CHANNELCONFIG
+    cdef public np.ndarray TriggerConfig_modified   # ARRAY_TRIGGERCONFIG
 
     # For acquisition thread
-    AcquisitionThread=None
+    cdef public object AcquisitionThread
     
     cdef int pipe_fd_acqctrl[2]
     cdef int pipe_fd_acqresp[2]
@@ -232,11 +242,22 @@ cdef class CSLowLevel:
     cdef int64_t lastglobalrev
     
     
-    def __init__(self,uint32_t boardtype,uint32_t numchannels,uint32_t samplebits,int16_t index):
+    def __init__(self,ParamDict,uint32_t boardtype,uint32_t numchannels,uint32_t samplebits,int16_t index):
         """ parameters boardtype (e.g. gagecontstants.CSXXXX_BOARDTYPE), numchannels, samplebits, and index used solely (per CsGetSystem() documentation) the
         board or boards to be initialized. These parameters may 
         be given as zero to represent "don't care". C"""
+        self.ParamDict=ParamDict
+        self.SysInfo=None
+        self.AcquisitionConfig=None
+        self.ChannelConfig=None
+        self.TriggerConfig=None
+        self.AcquisitionThread=None
+
+        sys.stderr.write("Calling CsInitialize()\n")
+        sys.stderr.flush()
         err=CsInitialize()
+        sys.stderr.write("Called CsInitialize()\n")
+        sys.stderr.flush()
         if err < 0:
             raise CSError("CsInitialize()",err)
         
@@ -252,9 +273,9 @@ cdef class CSLowLevel:
         self.Length=0
         self.SysInfo=self.GetSystemInfo()
         self.ARRAY_TRIGGERCONFIG=np.dtype([ ("TriggerCount",np.uint32),
-                                            ("Trigger",CSTRIGGERCONFIG,self.SysInfo.TriggerMachinesCount)])
+                                            ("Trigger",CSTRIGGERCONFIG,self.SysInfo[0]["TriggerMachinesCount"])],align=True)
         self.ARRAY_CHANNELCONFIG=np.dtype([ ("ChannelCount",np.uint32),
-                                            ("Channel",CSCHANNELCONFIG,self.SysInfo.ChannelCount)])
+                                            ("Channel",CSCHANNELCONFIG,self.SysInfo[0]["ChannelCount"])],align=True)
 
 
         if pipe(self.pipe_fd_acqctrl) != 0:
@@ -274,8 +295,12 @@ cdef class CSLowLevel:
         pass
 
     def StartAcqThread(self):
-        self.AcquisitionThread = Thread(self.AcquisitionThreadCode)
-        self.RestartAcq()
+        self.RestartAcq()  # Set up parameters
+        # Set acquisition thread going
+        self.AcquisitionThread = Thread(target=self.AcquisitionThreadCode,daemon=True)
+        self.AcquisitionThread.start()
+        sys.stderr.write("AcquisitionThread started\n")
+        sys.stderr.flush()
         pass
     
     cdef void ConvertChannelToVoltage(self,void *RawBuffer, wfmstore.Wfm *Target, int32_t ChannelIndex,uint32_t SampleSize,uint32_t InputRange, int32_t SampleOffsetInQuantSteps,int32_t SampleResolution,int32_t DcOffset,int64_t Length) nogil:
@@ -318,6 +343,7 @@ cdef class CSLowLevel:
 
 
         # Write 'A' for abort
+        sys.stderr.write("Writing 'A'\n")
         ctrlbyte='A'
         err=EAGAIN
         while err==EAGAIN or err==EINTR:
@@ -326,6 +352,7 @@ cdef class CSLowLevel:
             pass
         
         # Wait for response of 'S' for stopped
+        sys.stderr.write("Waiting for 'S'\n")
         while ctrlbyte != 'S': 
             err=EAGAIN
             while err==EAGAIN or err==EINTR:
@@ -347,10 +374,14 @@ cdef class CSLowLevel:
         OldLengthBytes=self.SampleSize*self.Length
 
         
-        ChannelsPerBoard = self.SysInfo.ChannelCount//self.SysInfo.BoardCount
-        MaskedMode = self.GetAcquisitionParam("Mode") & gc.CS_MASKED_MODE
-        self.ChannelCount = self.SysInfo.ChannelCount
+        ChannelsPerBoard = self.SysInfo[0]["ChannelCount"]//self.SysInfo[0]["BoardCount"]
+        MaskedMode = self.GetAcquisitionParamRaw("Mode") & gc.CS_MASKED_MODE
+        self.ChannelCount = self.SysInfo[0]["ChannelCount"]
         self.ChannelIncrement = ChannelsPerBoard//MaskedMode
+        if self.ChannelIncrement==0:
+            self.ChannelIncrement=1
+            pass
+        
 
         NumAcqChannels=self.ChannelCount//self.ChannelIncrement
 
@@ -364,7 +395,7 @@ cdef class CSLowLevel:
 
         dgold.dg_enter_main_context()
         try:
-            my_id=str(id(self))
+            my_id=str(id(self)).encode('utf-8')
             if (self.Channel != NULL and NumAcqChannels != OldAcqChannels) or not(self.Channel):
                 if self.Channel:
                     for cnt in range(OldAcqChannels):
@@ -375,27 +406,29 @@ cdef class CSLowLevel:
                 self.Channel=<wfmstore.Channel **>calloc(sizeof(wfmstore.Channel *)*NumAcqChannels,1)
 
                 for cnt in range(NumAcqChannels):
-                    ChanName="CH%d" % (cnt+1)
+                    ChanName=("CH%d" % (cnt+1)).encode('utf-8')
                     self.Channel[cnt]=wfmstore.CreateChannel(ChanName,my_id,0,NULL,0)
                     pass
                 pass
             pass
+        except:
+            raise
         finally:
             dgold.dg_leave_main_context()
             pass
         
-        self.PreTriggerSamples = self.GetAcquisitionParam("TriggerHoldoff")
-        self.Length=self.GetAcquisitionParam("Depth")
+        self.PreTriggerSamples = self.GetAcquisitionParamRaw("TriggerHoldoff")
+        self.Length=self.GetAcquisitionParamRaw("Depth")
 
-        self.SampleSize = self.GetAcquisitionParam("SampleSize")
+        self.SampleSize = self.GetAcquisitionParamRaw("SampleSize")
 
             
         # Not sure I understand the start address calculation... it's not in the docs. This is based on the minimum start address formula from Events.c
-        self.StartAddress = self.GetAcquisitionParam("TriggerDelay") + self.Length - self.GetAcquisitionParam("SegmentSize")
+        self.StartAddress = self.GetAcquisitionParamRaw("TriggerDelay") + self.Length - self.GetAcquisitionParamRaw("SegmentSize")
         
-        if self.Length > self.GetAcquisitionParam("SegmentSize"):
+        if self.Length > self.GetAcquisitionParamRaw("SegmentSize"):
             sys.stderr.write("CompuScope: Depth larger than SegmentSize")
-            self.Length = self.GetAcquisitionParam("SegmentSize")
+            self.Length = self.GetAcquisitionParamRaw("SegmentSize")
             pass
 
         if (self.RawBuffers != NULL and NumAcqChannels != OldAcqChannels) or not (self.RawBuffers):
@@ -427,11 +460,11 @@ cdef class CSLowLevel:
             pass
         
         for Cnt in range(NumAcqChannels):
-            self.InputRange[Cnt]=self.GetChannelParam("ChanInputRange",Cnt*self.ChannelIncrement)
+            self.InputRange[Cnt]=self.GetChanParamRaw("ChanInputRange",Cnt*self.ChannelIncrement)
             pass
-        self.SampleOffsetInQuantSteps=self.GetAcquisitionParam("SampleOffset")
+        self.SampleOffsetInQuantSteps=self.GetAcquisitionParamRaw("SampleOffset")
 
-        self.SampleResolution=self.SysInfo.SampleResolution
+        self.SampleResolution=self.SysInfo[0]["SampleResolution"]
 
         if (self.DcOffset != NULL and NumAcqChannels != OldAcqChannels) or not (self.DcOffset):
             if self.DcOffset:
@@ -442,7 +475,7 @@ cdef class CSLowLevel:
             pass
         
         for Cnt in range(NumAcqChannels):
-            self.DcOffset[Cnt]=self.GetChannelParam("DcOffset",Cnt*self.ChannelIncrement)
+            self.DcOffset[Cnt]=self.GetChanParamRaw("ChanDcOffset",Cnt*self.ChannelIncrement)
             pass
 
         # ProbeAtten should be configured as a property of the
@@ -476,11 +509,19 @@ cdef class CSLowLevel:
         cdef ssize_t nbytes
         cdef char ctrlbyte=0
 
+        fprintf(stderr,"acqthread_recv_cmd()\n");
         err=EAGAIN
         while err==EAGAIN or err==EINTR:
             nbytes=read(self.pipe_fd_acqctrl[0],&ctrlbyte,1)
-            err=errno
+            if nbytes < 0:
+                err=errno
+                pass
+            else: 
+                err=0
+                pass
             pass
+        fprintf(stderr,"acqthread_recv_cmd() err=%d nbytes=%d returning %d\n",<int>err,<int>nbytes,<int>ctrlbyte);
+        err=EAGAIN
         if nbytes != 1:
             # Treat error or EOF as quit command
             return 'Q'
@@ -490,12 +531,20 @@ cdef class CSLowLevel:
         cdef ssize_t nbytes
         cdef char ctrlbyte=0
 
+        fprintf(stderr,"acqthread_wait_for_ok()\n")
+
         # Write 'S' for stopped
         ctrlbyte='S'
         err=EAGAIN
         while err==EAGAIN or err==EINTR:
             nbytes=write(self.pipe_fd_acqresp[1],&ctrlbyte,1)
-            err=errno
+            if nbytes < 0:
+                err=errno
+                pass
+            else:
+                err=0
+                pass
+
             pass
 
         # Wait for response of 'G'
@@ -503,12 +552,19 @@ cdef class CSLowLevel:
             err=EAGAIN
             while err==EAGAIN or err==EINTR:
                 nbytes=read(self.pipe_fd_acqctrl[0],&ctrlbyte,1)
-                err=errno
+                if nbytes < 0:
+                    err=errno
+                    pass
+                else:
+                    err=0
+                    pass
                 pass
             if nbytes != 1:
                 # Treat error or EOF as quit command
                 return 'Q'
             pass
+        fprintf(stderr,"acqthread_wait_for_ok() done.\n")
+
         return ctrlbyte
 
     def acqthread_flushwfms(self,valid_data):
@@ -574,6 +630,9 @@ cdef class CSLowLevel:
         cdef IN_PARAMS_TRANSFERDATA InParams
         cdef OUT_PARAMS_TRANSFERDATA OutParams
         
+        sys.stderr.write("AcquisitionThread: start\n")
+        sys.stderr.flush()
+
         pollfds[0].fd = self.pipe_fd_acqctrl[0]
         pollfds[1].fd = self.fd_end_acq_read
         #pollfds[2].fd = self.fd_triggered_read
@@ -583,12 +642,14 @@ cdef class CSLowLevel:
         #pollfds[2].events=POLLIN
 
         InParams.u32Segment=1
-        InParams.u32Mode=gc.TxMODE_DEFAULT
+        InParams.u32Mode=gc.TxMODE_DATA_ANALOGONLY # equivalent to TxMODE_DEFAULT
         InParams.hNotifyEvent=NULL
         
         err=0
         
         while not Quit:
+            sys.stderr.write("AcquisitionThread: Loop start\n")
+            sys.stderr.flush()
             # Error handling is at beginning of loop so we can use
             # continue directive to break out into error handling
             if err < 0:
@@ -777,6 +838,7 @@ cdef class CSLowLevel:
     def GetSystemInfo(self):
         cdef np.ndarray SysInfo
         SysInfo=np.zeros(1,dtype=np.dtype([ ("Size",np.uint32),
+                                            ("Pad0",np.uint32),
                                             ("MaxMemory",np.int64),
                                             ("SampleBits",np.uint32),
                                             ("SampleResolution",np.int32),
@@ -788,12 +850,14 @@ cdef class CSLowLevel:
                                             ("BaseBoardOption",np.uint32),
                                             ("TriggerMachinesCount",np.uint32),
                                             ("ChannelCount",np.uint32),
-                                            ("BoardCount",np.uint32)]))
-        
+                                            ("BoardCount",np.uint32)],align=True))
+        SysInfo[0]["Size"]=SysInfo.dtype.itemsize
         err=CsGetSystemInfo(self.System,<PCSSYSTEMINFO>SysInfo.data)
         if err < 0:
             raise CSError("CsGetSystemInfo()",err)
 
+        print("Got SysInfo: %s" % (str(SysInfo)))
+        print("self.System: "+str(self.System))
         return SysInfo
     
     
@@ -801,25 +865,32 @@ cdef class CSLowLevel:
         assert(not self.InTransaction)
         self.WaitAbortAcq()
         self.InTransaction=1
-        self.AcquistionConfig=None
+        self.AcquisitionConfig=None
         self.ChannelConfig=None
         self.TriggerConfig=None
         pass
 
     def GetTriggerConfig(self):
         cdef np.ndarray TriggerArray
+        cdef np.ndarray TriggerArrayEntry
+
         if self.TriggerConfig is None:
             # Initialize TriggerArray
             TriggerArray=np.zeros(1,dtype=self.ARRAY_TRIGGERCONFIG)
-            TriggerArray.TriggerCount=self.SysInfo.TriggerMachinesCount
-            for cnt in range(self.SysInfo.TriggerMachinesCount):
-                TriggerArray.Trigger[cnt].Size=CSTRIGGERCONFIG.itemsize
-                TriggerArray.Trigger[cnt].TriggerIndex=cnt+1 # GAGE indexing seems to be by natural numbers
+            TriggerArray[0]["TriggerCount"]=self.SysInfo[0]["TriggerMachinesCount"]
+            for cnt in range(self.SysInfo[0]["TriggerMachinesCount"]):
+                TriggerArray[0]["Trigger"][cnt]["Size"]=CSTRIGGERCONFIG.itemsize
+                TriggerArray[0]["Trigger"][cnt]["TriggerIndex"]=cnt+1 # GAGE indexing seems to be by natural numbers
+                TriggerArrayEntry=np.array(TriggerArray[0]["Trigger"][cnt],dtype=CSTRIGGERCONFIG)
+                err = CsGet(self.System,gc.CS_TRIGGER,gc.CS_CURRENT_CONFIGURATION,TriggerArrayEntry.data)
+                if err < 0:
+                    raise CSError("CsGet()",err)
+                TriggerArray[0]["Trigger"][cnt]=TriggerArrayEntry
                 pass
             
-            err = CsGet(self.System,gc.CS_TRIGGER_ARRAY,gc.CS_CURRENT_CONFIGURATION,TriggerArray.data)
-            if err < 0:
-                raise CSError("CsGet()",err)
+            #err = CsGet(self.System,gc.CS_TRIGGER_ARRAY,gc.CS_CURRENT_CONFIGURATION,TriggerArray.data)
+            #if err < 0:
+            #    raise CSError("CsGet()",err)
             self.TriggerConfig = TriggerArray
             self.TriggerConfig_modified = TriggerArray.copy()
             
@@ -828,21 +899,30 @@ cdef class CSLowLevel:
 
     def GetChannelConfig(self):
         cdef np.ndarray ChannelArray
-        
+        cdef np.ndarray ChannelArrayEntry
+
         if self.ChannelConfig is None:
             # Initialize ChannelArray
             ChannelArray=np.zeros(1,dtype=self.ARRAY_CHANNELCONFIG)
-            ChannelArray.ChannelCount=self.SysInfo.ChannelCount
-            for cnt in range(self.SysInfo.ChannelCount):
-                ChannelArray.Channel[cnt].Size=CSCHANNELCONFIG.itemsize
-                ChannelArray.Channel[cnt].ChannelIndex=cnt+1 # GAGE indexing seems to be by natural numbers
+            ChannelArray[0]["ChannelCount"]=self.SysInfo[0]["ChannelCount"]
+            for cnt in range(self.SysInfo[0]["ChannelCount"]):
+                ChannelArray[0]["Channel"][cnt]["Size"]=CSCHANNELCONFIG.itemsize
+                ChannelArray[0]["Channel"][cnt]["ChannelIndex"]=cnt+1 # GAGE indexing seems to be by natural numbers
+                ChannelArrayEntry=np.array(ChannelArray[0]["Channel"][cnt],dtype=CSCHANNELCONFIG)
+                err = CsGet(self.System,gc.CS_CHANNEL,gc.CS_CURRENT_CONFIGURATION,ChannelArrayEntry.data)
+                if err < 0:
+                    raise CSError("CsGet()",err)
+                ChannelArray[0]["Channel"][cnt]=ChannelArrayEntry
                 pass
-            
-            err = CsGet(self.System,gc.CS_CHANNEL_ARRAY,gc.CS_CURRENT_CONFIGURATION,ChannelArray.data)
-            if err < 0:
-                raise CSError("CsGet()",err)
+            print("ChannelArray: "+str(ChannelArray))
+            print("self.System: "+str(self.System))
+            #err = CsGet(self.System,gc.CS_CHANNEL_ARRAY,gc.CS_CURRENT_CONFIGURATION,ChannelArray.data)
+            #if err < 0:
+            #    raise CSError("CsGet()",err)
+            print("ChannelArrayOut: "+str(ChannelArray))
             self.ChannelConfig = ChannelArray
             self.ChannelConfig_modified = ChannelArray.copy()
+            sys.stdout.flush()
             
             pass
         pass
@@ -852,7 +932,7 @@ cdef class CSLowLevel:
         cdef np.ndarray AcqConfig
         if self.AcquisitionConfig is None:
             AcqConfig=np.zeros(1,dtype=CSACQUISITIONCONFIG)
-            AcqConfig.Size=AcqConfig.itemsize
+            AcqConfig[0]["Size"]=AcqConfig.itemsize
             err = CsGet(self.System,gc.CS_ACQUISITION,gc.CS_CURRENT_CONFIGURATION,AcqConfig.data)
             if err < 0:
                 raise CSError("CsGet()",err)
@@ -864,20 +944,29 @@ cdef class CSLowLevel:
 
 
     def SetTrigParam(self,name,trailingindex,value):
+        cdef np.ndarray TriggerArrayEntry
         assert(self.InTransaction)
 
         self.GetTriggerConfig() # fill out self.TriggerConfig and self.TriggerConfig_modified if not already set. 
 
         
-        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = ParamDict[name]
+        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = self.ParamDict[name]
         assert(ParamClass=="TRIG")
         
-        setattr(self.TriggerConfig_modified.Trigger[trailingindex-1],name,ParseValue(value))
+        self.TriggerConfig_modified[0]["Trigger"][trailingindex-1][name[4:]]=ParseValue(value)
         
-        assert(self.TriggerConfig_modified.c_contiguous)
-        err = CsSet(self.System,gc.CS_TRIGGER_ARRAY,self.TriggerConfig_modified.data)
-        if err < 0:
-            raise CSError("CsSet(TriggerConfig)",err)
+        assert(self.TriggerConfig_modified.flags.c_contiguous)
+
+        for cnt in range(self.SysInfo[0]["TriggerMachinesCount"]):
+            TriggerArrayEntry=np.array(self.TriggerConfig_modified[0]["Trigger"][cnt],dtype=CSTRIGGERCONFIG)
+            err = CsSet(self.System,gc.CS_TRIGGER,TriggerArrayEntry.data)
+            if err < 0:
+                raise CSError("CsSet(TriggerConfig)",err)
+            pass
+            
+        #err = CsSet(self.System,gc.CS_TRIGGER_ARRAY,self.TriggerConfig_modified.data)
+        #if err < 0:
+        #    raise CSError("CsSet(TriggerConfig)",err)
         
         # Need to CommitParamTransaction() for this to take effect
         pass
@@ -890,19 +979,35 @@ cdef class CSLowLevel:
         cdef np.ndarray TriggerConfig
         cdef np.ndarray ChannelConfig
         cdef np.ndarray AcquisitionConfig
+        cdef np.ndarray ChannelArrayEntry
+        cdef np.ndarray TriggerArrayEntry
         
         if self.TriggerConfig is not None:
             TriggerConfig=self.TriggerConfig
-            err = CsSet(self.System,gc.CS_TRIGGER_ARRAY,TriggerConfig.data)   
-            if err < 0:
-                raise CSError("CsSet(TriggerConfig)",err)
+            for cnt in range(self.SysInfo[0]["TriggerMachinesCount"]):
+                TriggerArrayEntry=np.array(TriggerConfig[0]["Trigger"][cnt],dtype=CSTRIGGERCONFIG)
+                err = CsSet(self.System,gc.CS_TRIGGER,TriggerArrayEntry.data)   
+                if err < 0:
+                    raise CSError("CsSet(TriggerConfig)",err)
+                pass
+                
+            #err = CsSet(self.System,gc.CS_TRIGGER_ARRAY,TriggerConfig.data)   
+            #if err < 0:
+            #    raise CSError("CsSet(TriggerConfig)",err)
             pass
 
         if self.ChannelConfig is not None:
             ChannelConfig=self.ChannelConfig
-            err = CsSet(self.System,gc.CS_CHANNEL_ARRAY,ChannelConfig.data)   
-            if err < 0:
-                raise CSError("CsSet(ChannelConfig)",err)
+            for cnt in range(self.SysInfo[0]["ChannelCount"]):
+                ChannelArrayEntry=np.array(ChannelConfig[0]["Channel"][cnt],dtype=CSCHANNELCONFIG)
+                err = CsSet(self.System,gc.CS_CHANNEL,ChannelArrayEntry.data)
+                if err < 0:
+                    raise CSError("CsSet(ChannelConfig)",err)
+                pass
+            
+            #err = CsSet(self.System,gc.CS_CHANNEL_ARRAY,ChannelConfig.data)   
+            #if err < 0:
+            #    raise CSError("CsSet(ChannelConfig)",err)
             pass
 
         if self.AcquisitionConfig is not None:
@@ -939,20 +1044,27 @@ cdef class CSLowLevel:
         pass
 
     def SetChanParam(self,name,trailingindex,value):
+        cdef np.ndarray ChannelArrayEntry
         assert(self.InTransaction)
 
         self.GetChannelConfig() # fill out self.ChannelConfig and self.ChannelConfig_modified if not already set. 
 
         
-        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = ParamDict[name]
+        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = self.ParamDict[name]
         assert(ParamClass=="CHAN")
         
-        setattr(self.ChannelConfig_modified.Chan[trailingindex-1],name,ParseValue(value))
+        self.ChannelConfig_modified[0]["Channel"][trailingindex-1][name[4:]]=ParseValue(value)
         
-        assert(self.ChannelConfig_modified.c_contiguous)
-        err = CsSet(self.System,gc.CS_CHANNEL_ARRAY,self.ChannelConfig_modified.data)
-        if err < 0:
-            raise CSError("CsSet(ChannelConfig)",err)
+        assert(self.ChannelConfig_modified.flags.c_contiguous)
+        for cnt in range(self.SysInfo[0]["ChannelCount"]):
+            ChannelArrayEntry=np.array(self.ChannelConfig_modified[0]["Channel"][cnt],dtype=CSCHANNELCONFIG)
+            err = CsSet(self.System,gc.CS_CHANNEL,ChannelArrayEntry.data)
+            if err < 0:
+                raise CSError("CsSet(ChannelConfig)",err)
+            pass
+        #err = CsSet(self.System,gc.CS_CHANNEL_ARRAY,self.ChannelConfig_modified.data)
+        #if err < 0:
+        #    raise CSError("CsSet(ChannelConfig)",err)
         
         # Need to CommitParamTransaction() for this to take effect
 
@@ -963,12 +1075,12 @@ cdef class CSLowLevel:
         self.GetAcquisitionConfig() # fill out self.AcquisitionConfig and self.AcquisitionConfig_modified if not already set. 
 
         
-        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = ParamDict[name]
+        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = self.ParamDict[name]
         assert(ParamClass=="ACQ")
         
-        setattr(self.AcquisitionConfig_modified,name,ParseValue(value))
+        self.AcquisitionConfig_modified[0][name]=ParseValue(value)
         
-        assert(self.AcquisitionConfig_modified.c_contiguous)
+        assert(self.AcquisitionConfig_modified.flags.c_contiguous)
         err = CsSet(self.System,gc.CS_ACQUISITION,self.AcquisitionConfig_modified.data)
         if err < 0:
             raise CSError("CsSet(AcquisitionConfig)",err)
@@ -981,9 +1093,9 @@ cdef class CSLowLevel:
 
     def SetParam(self,name,trailingindex,value):
         assert(self.InTransaction)
-        assert(name in ParamDict)
+        assert(name in self.ParamDict)
 
-        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = ParamDict[name]
+        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = self.ParamDict[name]
         if trailingindex != 1:
             assert(ParamClass=="TRIG" or ParamClass=="CHAN") # only TRIG and CHAN have multiple indices
             pass
@@ -999,345 +1111,51 @@ cdef class CSLowLevel:
             pass
         pass
 
+    def GetTrigParamRaw(self,name,trailingindex):
+        self.GetTriggerConfig()
+        return self.TriggerConfig[0]["Trigger"][trailingindex-1][name[4:]]
+
+    def GetChanParamRaw(self,name,trailingindex):
+        self.GetChannelConfig()
+        return self.ChannelConfig[0]["Channel"][trailingindex-1][name[4:]]
+
+    def GetAcquisitionParamRaw(self,name):
+        self.GetAcquisitionConfig()
+        return self.AcquisitionConfig[0][name]
+
     def GetTrigParam(self,name,trailingindex):
         self.GetTriggerConfig()
-        return getattr(self.TriggerConfig.Trigger[trailingindex-1],name)
+        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = self.ParamDict[name]
+        return ReturnValue(self.TriggerConfig[0]["Trigger"][trailingindex-1][name[4:]])
 
     def GetChanParam(self,name,trailingindex):
         self.GetChannelConfig()
-        return getattr(self.ChannelConfig.Channels[trailingindex-1],name)
+        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = self.ParamDict[name]
+        return ReturnValue(self.ChannelConfig[0]["Channel"][trailingindex-1][name[4:]])
 
     def GetAcquisitionParam(self,name):
         self.GetAcquisitionConfig()
-        return getattr(self.AquisitionConfig,name)
+        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = self.ParamDict[name]
+        return ReturnValue(self.AcquisitionConfig[0][name])
         
 
-    def GetParam(self,name,trailingindex,value):
+    def GetParam(self,name,trailingindex):
         assert(not self.InTransaction)
-        assert(name in ParamDict)
+        assert(name in self.ParamDict)
 
-        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = ParamDict[name]
+        (ParamClass,dtype,ReturnValue,ParseValue,HelpInfo) = self.ParamDict[name]
         if trailingindex != 1:
             assert(ParamClass=="TRIG" or ParamClass=="CHAN") # only TRIG and CHAN have multiple indices
             pass
         if ParamClass=="TRIG":
-            self.GetTrigParam(name,trailingindex)
-            pass
+            return self.GetTrigParam(name,trailingindex)
         elif ParamClass=="CHAN":
-            self.GetChanParam(name,trailingindex)
-            pass
+            return self.GetChanParam(name,trailingindex)
         else:
             assert(ParamClass=="ACQ")
-            self.GetAcquisitionParam(name)
-            pass
+            return self.GetAcquisitionParam(name)
         pass
 
     
     
     pass
-
-# Index into ModeStrs list is bitnum. 
-AcqModeStrs = [ "SINGLE","DUAL","QUAD","OCT", # 0x1 - 0x8 
-             None,None,None,"POWER_ON", # 0x10 - 0x80
-             None,"PRETRIG_MULREC","REFERENCE_CLK","CS3200_CLK_INVERT", # 0x100-0x800
-             "SW_AVERAGING" ] # 0x1000
-
-AcqModeStrs_array=np.array(AcqModeStrs,dtype=np.object)
-
-
-TimeStampModeStrs = [ "TIMESTAMP_MCLK", None, None, None, # 0x1 - 0x8 
-                      "TIMESTAMP_FREERUN",None,] # 0x10 
-
-TimeStampModeStrs_array=np.array(TimeStampModeStrs,dtype=np.object)
-
-TermStrs = [ "CS_COUPLING_DC", "CS_COUPLING_AC", "CS_DIFFERENTIAL_INPUT", "CS_DIRECT_ADC_INPUT", ] # 0x1 - 0x8 
-
-TermStrs_array=np.array(TermStrs,dtype=np.object)
-
-
-
-def PrintMode(mode,ModeStrs_array):
-    ModeNums = np.arange(ModeStrs_array.shape[0])
-    ModeBits = 1 << ModeNums
-    
-    ModeBitsInMode = ModeBits & mode
-    ModeStrsInMode = ModeStrs_array[ModeBitsInMode.astype(np.bool)]
-    return "|".join(ModeStrsInMode)
-
-def ParseMode(ModeStr,ModeStrs,ModeStrs_array):
-
-    if isinstance(ModeStr,numbers.Number):
-        return int(ModeStr) # Can directly process an integer mode
-    
-    Strs=ModeStr.split("|")
-    value=0
-    for M in Strs:
-        try: 
-            bitnum = ModeStrs.index(M.strip())
-            pass
-        except ValueError:
-            raise ValueError("Mode bit %s not found. Valid possibilities: %s" % (M.strip(),ModeStrs_array[ModeStrs_array != None]))
-            pass
-        value |= (1 << bitnum)
-        pass
-    return value
-
-def PrintTriggerTimeout(val):
-    if val==gc.CS_TIMEOUT_DISABLE:
-        return "TIMEOUT_DISABLE"
-    else:
-        return (val*100e-9)*u.second
-    pass
-
-def ParseTriggerTimeout(val):
-    if val=="TIMEOUT_DISABLE":
-        return gc.CS_TIMEOUT_DISABLE
-    return float(val/u.second)/100e-9
-
-ParamDict={
-    # Contents:
-    # ParamName: (ParamClass(either "TRIG","CHAN",or"ACQ"),numpy dtype,function_to_interpret_hw_value,function_to_assign_hw_value,HelpInfo)
-    "SampleRate": ("ACQ",np.int64,lambda val: val*u.Hz, lambda rate: int(round(rate/u.Hz)),"the sampling rate in Hz"),
-    "ExtClk": ("ACQ",np.bool,lambda val: { True: "ENABLED", False: "DISABLED"}[val], lambda state: {"ENABLED": True,"DISABLED": False}[state],"whether ExtClk is ENABLED or DISABLED"),
-    "ExtClkSampleSkip": ("ACQ",np.uint32, None, None,"number of ExtClk samples skipped"),
-    "Mode": ("ACQ", np.uint32, lambda num: PrintMode(num,AcqModeStrs_array), lambda  m: ParseMode(m,AcqModeStrs,AcqModeStrs_array),"acquisition mode bits, selected from %s" % (AcqModeStrs_array[AcqModeStrs_array != None])),
-    "SampleBits": ("ACQ", np.uint32, lambda val: val, lambda num: np.uint32(num),"Vertical resolution in bits of the acquisition"),
-    "SampleRes": ("ACQ", np.int32, lambda val: val, lambda num: np.int32(num),"Sample resolution. This seems to be the number of quantization steps in the positive half of the measurement range (?)"),
-    "SampleSize": ("ACQ", np.uint32, lambda val: val, lambda num: np.uint32(num),"Sample size for acquisition, in bytes per sample"),
-    "SegmentCount": ("ACQ", np.uint32, lambda val: val, lambda num: np.uint32(num),"Number of segments for acquisition (more than 1 will probably fail to work with this code)"),
-    "Depth": ("ACQ", np.int64, lambda val: val, lambda num: np.int64(num),"Number of samples to capture after the trigger event"),
-    "SegmentSize": ("ACQ", np.int64, lambda val: val, lambda num: np.int64(num),"Maximum number of samples in a segment"),
-    "TriggerTimeout": ("ACQ",np.int64, PrintTriggerTimeout, ParseTriggerTimeout,"Amount of time to wait (in 100 nanoseconds units) after start of segment acquisition before forcing a trigger event. CS_TIMEOUT_DISABLE means infinite timeout."),
-    "TrigEnginesEn": ("ACQ",np.bool,lambda val: { True: "ENABLED", False: "DISABLED"}[val], lambda state: {"ENABLED": True,"DISABLED": False}[state],"whether Trigger engines are ENABLED or DISABLED"),
-
-    "TriggerDelay": ("ACQ", np.int64, lambda val: val, lambda num: np.int64(num),"Number of samples to skip after trigger before decrementing depth counter"),
-
-    "TriggerHoldoff": ("ACQ", np.int64, lambda val: val, lambda num: np.int64(num),"Number of samples to acquire before enabling trigger circuitry, i.e. pretrigger amount"),
-    "SampleOffset": ("ACQ", np.int32, lambda val: val, lambda num: np.int32(num),"System sample offset"),
-    "TimeStampConfig": ("ACQ", np.uint32, lambda num: PrintMode(num,TimeStampModeStrs_array), lambda  m: ParseMode(m,TimeStampModeStrs,TimeStampModeStrs_array),"Time stamp mode bits, selected from %s" % (TimeStampModeStrs_array[TimeStampModeStrs_array != None])),
-    # !!!*** Need to do rest of parameters here !!!***
-    # i.e Channel (CHAN) paramters and trigger (TRIG) parameters
-
-    "ChanTerm": ("CHAN",np.uint32,lambda num: PrintMode(num,TermStrs_array), lambda  m: ParseMode(m,TermStrs,TermStrs_array),"Termination mode bits, selected from %s" % (TermStrs_array[TermStrs_array != None])),
-    "ChanInputRange": ("CHAN",np.uint32,lambda val: (val/1000.0)*u.volt, lambda voltage: int(round((voltage/u.volt)*1000.0)),"Input range in volts"),
-    "ChanImpedance": ("CHAN",np.uint32,lambda val: val*u.Ohm, lambda res: int(round((res/u.Ohm))),"Input impedance in Ohms (50 or 1,000,000)"),
-    "ChanFilter": ("CHAN", np.uint32,lambda val: val, lambda num: np.uint32(num),"Filter index for this channel, or 0"),
-    "ChanDcOffset": ("CHAN",np.int32,lambda val: (val/1000.0)*u.volt, lambda voltage: int(round((voltage/u.volt)*1000.0)),"DC Offset in volts"),
-    "ChanCalib": ("CHAN",np.int32,lambda val: val, lambda num: np.int32(num),"Channel auto-calibration method (default 0)"),
-
-
-    "TrigCondition": ("TRIG",np.uint32,lambda val: ["NEG_SLOPE","POS_SLOPE"][val],lambda cond: { "NEG_SLOPE": 0, "POS_SLOPE":1 }[cond],"Trigger condition: NEG_SLOPE or POS_SLOPE"),
-    "TrigLevel": ("TRIG",np.int32,lambda val: val/100.0,lambda lev: np.int32(lev*100.0),"Trigger level as a fraction of full scale value"),
-    "TrigSource": ("TRIG",np.int32,lambda val: {0:"DISABLE",1:"CHAN_1",2:"CHAN_2",3:"CHAN_3",4:"CHAN_4",5:"CHAN_5",6:"CHAN_6",7:"CHAN_7",8:"CHAN_8",-1:"EXT"}[val],lambda src: { "DISABLE": 0, "CHAN_1":1, "CHAN_2":2, "CHAN_3":3, "CHAN_4":4, "CHAN_5":5, "CHAN_6": 6, "CHAN_7":7, "CHAN_8":8, "EXT":-1}[src],"Trigger source: DISABLE, CHAN_x, or EXT"),
-    "TrigExtCoupling": ("TRIG",np.uint32, lambda val: { 1:"DC",2:"AC"}[val],lambda coupling: { "DC": 1, "AC":2 }[coupling],"External trigger coupling: DC or AC"),
-    "TrigExtTriggerRange": ("TRIG",np.uint32,lambda val: (val/1000.0)*u.volt, lambda voltage: int(round((voltage/u.volt)*1000.0)),"External trigger full scale range, in Volts"),
-    "TrigExtTriggerImpedance": ("TRIG",np.uint32, lambda val: val*u.Ohm, lambda res: int(round((res/u.Ohm))),"External trigger impedance in Ohms (50 or 1,000,000)"),
-    "TrigRelation": ("TRIG",np.uint32,lambda val: ["OR","AND"][val],lambda rel: { "OR": 0, "AND":1 }[rel],"Trigger engine relation: OR or AND"),
-}
-
-
-def index_from_param(name):
-    trailingdigits=""
-    while isdigit(name[-1]):
-        trailingdigits=name[-1]+trailingdigits
-        name=name[:-1]
-        pass
-    
-    if len(trailingdigits) > 0:
-        trailingindex=int(trailingdigits)
-        pass
-    else:
-        trailingindex=1  # Gage indexing generally starts with 1
-        pass
-    return (name,trailingindex)
-    
-class ParamAttribute(object):
-    # Descriptor class. Instances of this are returned
-    # by __getattribute__ on the CompuScope class
-    # for each of the parameters (including with
-    # numbered suffixes) in ParamDict
-    # https://docs.python.org/2/howto/descriptor.html
-    Name=None
-    trailingindex=None
-    
-    def __init__(self,Name,trailingindex,doc):
-        self.Name=Name
-        self.trailingindex=trailingindex
-        self.__doc__=doc
-        pass
-    
-    def __get__(self,obj,type=None):
-
-        return obj.LowLevel.GetParam(self.Name,self.trailingindex)
-            
-
-    def __set__(self,obj,value):
-        obj.LowLevel.StartParamTransaction()
-        try:
-            obj.LowLevel.SetParam(self.Name,self.trailingindex,value)
-            obj.LowLevel.CommitParamTransaction()
-            pass
-        except:
-            obj.LowLevel.AbortParamTransaction()
-            raise
-        pass
-    pass
-    
-
-
-class CompuScope(object,metaclass=pydg_Module):
-    # pydg_Module ensures that all calls to this are within the same thread
-    LowLevel=None
-        
-    
-    def __init__(self,uint32_t boardtype, uint32_t numchannels, uint32_t samplebits, int16_t index,**params):
-        """ Create a CompuScope object for a specified
-        CompuScope system. The system is specified by 
-        board type (see BOARDTYPE defines in gageconstants.py)
-        or zero representing any board type, 
-        by number of channels (again zero representing any number),
-        by bits of resolution (again zero representing any number), 
-        and by index of matching boards (Gage documentation is 
-        ambiguous about whether index starts at 0 or 1). 
-
-        All parameters will be left at preexisting values 
-        (presumably last-used or driver default) unless 
-        provided as additional keyword parameters, that are 
-        applied as per the update() method.
-"""
-
-        #assert(sizeof(TCHAR)==1)
-
-        self.LowLevel=CSLowLevel(boardtype,numchannels,samplebits,index)
-        
-        self.update(**params)
-
-        self.LowLevel.StartAcqThread()
-        
-        pass
-
-    def update_dict(self,params):
-        """ Assign multiple parameters as a single operation
-        based on a dictionary """
-        
-        self.LowLevel.StartParamTransaction()
-        try:
-            for name in params:
-                (name_noindex,trailingindex)=index_from_param(name)
-                value=params[name]
-                
-                self.LowLevel.SetParam(name_noindex,trailingindex,value)
-                pass
-            
-            self.LowLevel.CommitParamTransaction()
-            pass
-        except:
-            self.LowLevel.AbortParamTransaction()
-            raise
-        
-        pass
-    
-    def update(self,**params):
-        """ Update a set of parameters as a single operation,
-        based on named keyword arguments"""
-
-
-        """Following concern is not valid because parameter validation
-        happens only when CsDo() is executed: Note that
-        in some cases the order in which they are applied might matter, 
-        because one parameter value might influence allowable possibilities
-        for another. In python 3.6 and beyond the order of keyword arguments
-        is preserved and this will happen correctly. For prior python versions,
-        user update_dict and pass a collections.OrderedDict(). """
-
-        return self.update_dict(params)
-
-    #def __getattr__(self,name):
-    #    # Return a function 
-    #    # representing a particular parameter
-    #
-    #    (name,trailingindex) = index_from_param(name)
-    #    
-    #    if name in ParamDict:
-    #        def ParamFunc(value=None):
-    #            if value is not None:
-    #                self.LowLevel.StartParamTransaction()
-    #                try:
-    #                    self.LowLevel.SetParam(name,trailingindex,value)
-    #                    self.LowLevel.CommitParamTransaction()
-    #                    pass
-    #                except:
-    #                    self.LowLevel.AbortParamTransaction()
-    #                    raise
-    #                pass
-    #            return self.LowLevel.GetParam(name,trailingindex)
-    #        ParamFunc.__name__=name
-    #        ParamFunc.__doc__="Get or set (if value is not None) %s." % (ParamDict[name][4])
-    #        return ParamFunc
-    #    else:
-    #        raise AttributeError
-    #    pass
-
-    def __getattribute__(self,attrname):
-        # WARNING: pydg.Module does NOT wrap __getattribute__
-        # and ensure it is executed in our thread context, but it
-        # DOES wrap whatever we return
-
-        (name,trailingindex) = index_from_param(attrname)        
-        if name in ParamDict:
-            return ParamAttribute(name,trailingindex,ParamDict[name][4])
-        # Fall through to default behavior if we don't have this attribute
-        
-        return object.__getattribute__(self,attrname)
-            
-    def get_all_params(self):
-        TrigCount=self.LowLevel.SysInfo.TriggerMachinesCount
-        ChanCount=self.LowLevel.SysInfo.ChannelCount
-
-        AcqParamDict={ ParamName: ParamVal for (ParamName,ParamVal) in ParamDict.items() if ParamVal[0]=="ACQ"}
-        TrigParamDict={ ParamName: ParamVal for (ParamName,ParamVal) in ParamDict.items() if ParamVal[0]=="TRIG"}
-        ChanParamDict={ ParamName: ParamVal for (ParamName,ParamVal) in ParamDict.items() if ParamVal[0]=="CHAN"}
-        
-        paramlist=[]
-
-        for ParamName in AcqParamDict:
-            paramlist.append(ParamName)
-            pass
-        
-        for ParamName in ChanParamDict:
-            for Cnt in range(ChanCount):
-                paramlist.append("%s%d" % (ParamName,Cnt+1))
-                pass
-            pass
-
-        for ParamName in TrigParamDict:
-            for Cnt in range(TrigCount):
-                paramlist.append("%s%d" % (ParamName,Cnt+1))
-                pass
-            pass
-        
-        return paramlist
-    
-    
-    def __dir__(self):
-        """ Return a list of attribute names """
-        physattribs = super(CompuScope,self).__dir__()
-
-        dynattribs=self.get_all_params()
-
-        return physattribs+dynattribs
-        
-    def queryall(self):
-        """ Query all settable parameters. Returns ordered dictionary
-        that can be passed to update() method"""
-        queryresp=collections.OrderedDict()
-        for paramname in self.get_all_params():
-            (name,trailingindex) = index_from_param(paramname)
-            value=self.LowLevel.GetParam(name,trailingindex)
-            queryresp[paramname]=value
-            pass
-        return queryresp
-    
-    pass
-
-# How to handle SET query (i.e. SET?) ANSWER: queryall() method
