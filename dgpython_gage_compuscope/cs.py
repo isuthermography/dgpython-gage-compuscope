@@ -200,6 +200,14 @@ class CompuScope(object,metaclass=pydg_Module):
         self.update(**params)
 
         self.LowLevel.StartAcqThread()
+
+        for paramname in self.get_all_params:
+            
+            # Create Descriptor for this parameter
+            descr = ParamAttribute(name,trailingindex,ParamDict[name][4])
+            self.__dict__[paramname] = descr
+
+            pass
         
         pass
 
@@ -265,36 +273,36 @@ class CompuScope(object,metaclass=pydg_Module):
     #        raise AttributeError
     #    pass
 
-    def __getattribute__(self,attrname):
-        # WARNING: pydg.Module does NOT wrap __getattribute__
-        # and ensure it is executed in our thread context, but it
-        # DOES wrap whatever we return
-
-        (name,trailingindex) = index_from_param(attrname)        
-        if name in ParamDict:
-            # We have to run the descriptor
-            # in our context
-            descr = ParamAttribute(name,trailingindex,ParamDict[name][4])
-            retval=RunInContext(self,descr.__get__,"__get__",(self,),{})
-           
-            # retval.__doc__=  ### Need to set docstring on a proxy object or wrapper instead
-            return retval
- 
-        # Fall through to default behavior if we don't have this attribute
-        
-        return object.__getattribute__(self,attrname)
-            
-    def __setattr__(self,attrname,value):
-        (name,trailingindex) = index_from_param(attrname)        
-        if name in ParamDict:
-            descr = ParamAttribute(name,trailingindex,ParamDict[name][4])
-            sys.stderr.write("Calling descriptor %s __set__ method\n" % (name))
-            sys.stderr.flush()
-            descr.__set__(self,value)
-            pass
-        # Fall through to default behavior if we don't have this attribute
-        
-        return object.__setattr__(self,attrname,value)
+    #def __getattribute__(self,attrname):
+    #    # WARNING: pydg.Module does NOT wrap __getattribute__
+    #    # and ensure it is executed in our thread context, but it
+    #    # DOES wrap whatever we return
+    #
+    #    (name,trailingindex) = index_from_param(attrname)        
+    #    if name in ParamDict:
+    #        # We have to run the descriptor
+    #        # in our context
+    #        descr = ParamAttribute(name,trailingindex,ParamDict[name][4])
+    #        retval=RunInContext(self,descr.__get__,"__get__",(self,),{})
+    #       
+    #        # retval.__doc__=  ### Need to set docstring on a proxy object or wrapper instead
+    #        return retval
+    #
+    #    # Fall through to default behavior if we don't have this attribute
+    #    
+    #    return object.__getattribute__(self,attrname)
+    #
+    #def __setattr__(self,attrname,value):
+    #    (name,trailingindex) = index_from_param(attrname)        
+    #    if name in ParamDict:
+    #        descr = ParamAttribute(name,trailingindex,ParamDict[name][4])
+    #        sys.stderr.write("Calling descriptor %s __set__ method\n" % (name))
+    #        sys.stderr.flush()
+    #        descr.__set__(self,value)
+    #        pass
+    #    # Fall through to default behavior if we don't have this attribute
+    #    
+    #    return object.__setattr__(self,attrname,value)
         
 
     def get_all_params(self):
