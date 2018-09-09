@@ -184,21 +184,21 @@ def add_CS_descriptors(cls):
         # Need to manually wrap the descriptor because pydg.Module
         # can't otherwise control descriptor access -- 
         # because the descriptor is called within object.__getattribute__()
-        setattr(cls,paramname,pydg.wrapdescriptor(descr))        
+        setattr(cls,paramname,descr)        
         pass
 
     for paramname in ChanParamDict:            
         # Create Descriptor for this parameter -- this is primarily so help() works, N equivalent to 1... additional copies for N>1 added by constructor
         descr = ParamAttribute(paramname,1,ParamDict[paramname][4])
-        setattr(cls,paramname,pydg.wrapdescriptor(descr))        
-        setattr(cls,paramname+"N",pydg.wrapdescriptor(descr))        
+        setattr(cls,paramname,descr)        
+        setattr(cls,paramname+"N",descr)        
         pass
 
     for paramname in TrigParamDict:            
         # Create Descriptor for this parameter -- this is primarily so help() works, N equivalent to 1... additional copies for N>1 added by constructor
         descr = ParamAttribute(paramname,1,ParamDict[paramname][4])
-        setattr(cls,paramname,pydg.wrapdescriptor(descr))        
-        setattr(cls,paramname+"N",pydg.wrapdescriptor(descr))        
+        setattr(cls,paramname,descr)        
+        setattr(cls,paramname+"N",descr)        
         pass
     return cls
 
@@ -245,7 +245,7 @@ class CompuScope(object,metaclass=pydg_Module):
             for Cnt in range(1,ChanCount):
                 # Create Descriptor for this parameter
                 descr = ParamAttribute(paramname,Cnt+1,ParamDict[paramname][4])
-                self.__dict__["%s%d" % (paramname,Cnt+1)] = pydg.wrapdescriptor(descr)
+                self.__dict__["%s%d" % (paramname,Cnt+1)] = descr
                 pass
             pass
 
@@ -254,7 +254,7 @@ class CompuScope(object,metaclass=pydg_Module):
             for Cnt in range(1,TrigCount):
                 # Create Descriptor for this parameter
                 descr = ParamAttribute(paramname,Cnt+1,ParamDict[paramname][4])
-                self.__dict__["%s%d" % (paramname,Cnt+1)] = pydg.wrapdescriptor(descr)
+                self.__dict__["%s%d" % (paramname,Cnt+1)] = descr
                 pass
             pass
         
