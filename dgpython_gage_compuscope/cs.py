@@ -4,11 +4,11 @@ import collections
 import traceback
 from threading import Thread
 
-from dataguzzler_python.pydg import Module as pydg_Module
-from dataguzzler_python.pydg import CurContext
-from dataguzzler_python.pydg import RunInContext
-from dataguzzler_python.pydg import u # PINT unit registry
-from dataguzzler_python import pydg
+from dataguzzler_python.dgpy import Module as dgpy_Module
+from dataguzzler_python.dgpy import CurContext
+from dataguzzler_python.dgpy import RunInContext
+from dataguzzler_python.dgpy import u # PINT unit registry
+from dataguzzler_python import dgpy
 
 from . import gageconstants as gc
 import numpy as np
@@ -181,7 +181,7 @@ def add_CS_descriptors(cls):
         # Create Descriptor for this parameter -- this is so help() works.
         
         descr = ParamAttribute(paramname,1,ParamDict[paramname][4])
-        # Need to manually wrap the descriptor because pydg.Module
+        # Need to manually wrap the descriptor because dgpy.Module
         # can't otherwise control descriptor access -- 
         # because the descriptor is called within object.__getattribute__()
         setattr(cls,paramname,descr)        
@@ -204,8 +204,8 @@ def add_CS_descriptors(cls):
 
 
 @add_CS_descriptors
-class CompuScope(object,metaclass=pydg_Module):
-    # pydg_Module ensures that all calls to this are within the same thread
+class CompuScope(object,metaclass=dgpy_Module):
+    # dgpy_Module ensures that all calls to this are within the same thread
     LowLevel=None
         
     
@@ -322,37 +322,6 @@ class CompuScope(object,metaclass=pydg_Module):
     #        raise AttributeError
     #    pass
 
-    #def __getattribute__(self,attrname):
-    #    # WARNING: pydg.Module does NOT wrap __getattribute__
-    #    # and ensure it is executed in our thread context, but it
-    #    # DOES wrap whatever we return
-    #
-    #    (name,trailingindex) = index_from_param(attrname)        
-    #    if name in ParamDict:
-    #        # We have to run the descriptor
-    #        # in our context
-    #        descr = ParamAttribute(name,trailingindex,ParamDict[name][4])
-    #        retval=RunInContext(self,descr.__get__,"__get__",(self,),{})
-    #       
-    #        # retval.__doc__=  ### Need to set docstring on a proxy object or wrapper instead
-    #        return retval
-    #
-    #    # Fall through to default behavior if we don't have this attribute
-    #    
-    #    return object.__getattribute__(self,attrname)
-    #
-    #def __setattr__(self,attrname,value):
-    #    (name,trailingindex) = index_from_param(attrname)        
-    #    if name in ParamDict:
-    #        descr = ParamAttribute(name,trailingindex,ParamDict[name][4])
-    #        sys.stderr.write("Calling descriptor %s __set__ method\n" % (name))
-    #        sys.stderr.flush()
-    #        descr.__set__(self,value)
-    #        pass
-    #    # Fall through to default behavior if we don't have this attribute
-    #    
-    #    return object.__setattr__(self,attrname,value)
-        
 
     def get_all_params(self):
         TrigCount=self.LowLevel.SysInfo[0]["TriggerMachinesCount"]

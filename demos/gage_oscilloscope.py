@@ -12,8 +12,8 @@ signal.pthread_sigmask(signal.SIG_BLOCK,(signal.SIGFPE,signal.SIGCHLD))
 # Temporary hack until all needed symbols are in a separate dll...
 sys.setdlopenflags(os.RTLD_GLOBAL|os.RTLD_NOW)
 
-from dataguzzler_python import pydg
-from dataguzzler_python.pydg import u
+from dataguzzler_python import dgpy
+from dataguzzler_python.dgpy import u
 
 
 from dataguzzler_python import dgold

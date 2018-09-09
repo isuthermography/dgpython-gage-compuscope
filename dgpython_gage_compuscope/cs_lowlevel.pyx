@@ -4,10 +4,10 @@ import collections
 import traceback
 from threading import Thread
 
-from dataguzzler_python.pydg import Module as pydg_Module
-from dataguzzler_python.pydg import CurContext
-from dataguzzler_python.pydg import RunInContext
-from dataguzzler_python.pydg import u # PINT unit registry
+from dataguzzler_python.dgpy import Module as dgpy_Module
+from dataguzzler_python.dgpy import CurContext
+from dataguzzler_python.dgpy import RunInContext
+from dataguzzler_python.dgpy import u # PINT unit registry
 from dataguzzler_python cimport dgold
 from dataguzzler_python cimport wfmstore
 from dataguzzler_python cimport dg_internal
