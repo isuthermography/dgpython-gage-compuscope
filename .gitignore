@@ -3,4 +3,4 @@
 build/
 __pycache__
 *.pyc
-dgpython_gage_compuscope/cs.c
+dgpython_gage_compuscope/cs_lowlevel.c

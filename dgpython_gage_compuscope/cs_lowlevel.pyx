@@ -235,6 +235,7 @@ cdef class CSLowLevel:
     cpdef int32_t ChannelIncrement # Step size between channels
     cpdef uint32_t *InputRange
     cpdef uint32_t SampleSize
+    cpdef uint32_t SampleRate
     cpdef int32_t SampleOffsetInQuantSteps # i32SampleOffset... Should be corresponding to the top of the detectable voltage range
     cpdef int32_t SampleResolution # Number of quantization in positive half of measurement range.... i.e. 10 bits -> 1024 steps total -> SampleResolution = 512 steps
     cpdef int32_t *DcOffset # Array of dc offsets in mV
@@ -421,6 +422,7 @@ cdef class CSLowLevel:
         self.Length=self.GetAcquisitionParamRaw("Depth")
 
         self.SampleSize = self.GetAcquisitionParamRaw("SampleSize")
+        self.SampleRate = self.GetAcquisitionParamRaw("SampleRate")
 
             
         # Not sure I understand the start address calculation... it's not in the docs. This is based on the minimum start address formula from Events.c
@@ -611,6 +613,8 @@ cdef class CSLowLevel:
         cdef int32_t ChannelIndex
         cdef size_t dimlen
 
+        cdef ssize_t rderr
+
         cdef wfmstore.Wfm **Target
         cdef int64_t PreTriggerSamples
         cdef int64_t Length
@@ -624,6 +628,9 @@ cdef class CSLowLevel:
         cdef int32_t *DcOffset
         cdef int32_t SampleSize
         cdef double *ProbeAtten
+
+        cdef int nbytes
+        cdef char rd_sink
 
         cdef int32_t NumAcqChannels=ChannelCount//ChannelIncrement
         
@@ -682,6 +689,7 @@ cdef class CSLowLevel:
                 # Start data acquisition
                 err=CsDo(self.System,ACTION_START)
                 if err < 0:
+                    errmsg="CsDo(ACTION_START)"
                     continue # Break out and report error 
 
                 # NOTE: For win32 need to use WaitForSingleObject... See Gage Evetns.c/Threads.c example
@@ -695,10 +703,17 @@ cdef class CSLowLevel:
                     acqcmd=self.acqthread_recv_cmd()
                     if acqcmd=='A': # abort
                         err=CsDo(self.System,ACTION_ABORT)
+                        if err < 0:
+                            errmsg="A CsDo(ACTION_ABORT)"
+                            continue # Break out and report error 
+
                         self.acqthread_wait_for_ok() # report we are stopped. Wait for the goahead to continue
                         continue
                     if acqcmd=='Q': # quit
                         err=CsDo(self.System,ACTION_ABORT)
+                        if err < 0:
+                            errmsg="Q CsDo(ACTION_ABORT)"
+                            continue # Break out and report error 
                         Quit=1
                         continue
                     pass
@@ -708,6 +723,18 @@ cdef class CSLowLevel:
                     errmsg="Poll returned without end_of_acquisition"
                     continue
 
+                # read byte indicating termination of acquisition
+                rderr=EAGAIN
+                while rderr==EAGAIN or rderr==EINTR:
+                    nbytes=read(self.fd_end_acq_read,&rd_sink,1);
+                    if nbytes < 0:
+                        rderr=errno
+                        pass
+                    else:
+                        rderr=0
+                        pass
+                    pass
+                    
 
                 for ChannelIndex in range(NumAcqChannels): #range(1,self.ChannelCount+1,self.ChannelIncrement):
                     if err != 0:
@@ -719,10 +746,16 @@ cdef class CSLowLevel:
                         acqcmd=self.acqthread_recv_cmd()
                         if acqcmd=='A': # abort
                             err=CsDo(self.System,ACTION_ABORT)
+                            if err < 0:
+                                errmsg="CSTransfer A CsDo(ACTION_ABORT)"
+                                continue # Break out and report error 
                             self.acqthread_wait_for_ok() # report we are stopped. Wait for the goahead to continue
                             continue
                         if acqcmd=='Q': # quit
                             err=CsDo(self.System,ACTION_ABORT)
+                            if err < 0:
+                                errmsg="CSTransfer Q CsDo(ACTION_ABORT)"
+                                continue # Break out and report error 
                             Quit=1
                             continue
                         pass
@@ -730,6 +763,9 @@ cdef class CSLowLevel:
                     InParams.u16Channel=1+ChannelIndex*ChannelIncrement
                     InParams.pDataBuffer=RawBuffers[ChannelIndex]
                     err=CsTransfer(self.System,&InParams,&OutParams)
+                    if err < 0:
+                        errmsg="CSTransfer"
+                        continue # Break out and report error 
                     
                     pass
 
@@ -760,6 +796,9 @@ cdef class CSLowLevel:
                             with gil:
                                 self.acqthread_flushwfms(False)
                                 pass
+                            if err < 0:
+                                errmsg="Conversion A CsDo(ACTION_ABORT)"
+                                continue # Break out and report error 
                             self.acqthread_wait_for_ok() # report we are stopped. Wait for the goahead to continue
                             continue
                         if acqcmd=='Q': # quit
@@ -767,6 +806,9 @@ cdef class CSLowLevel:
                             with gil:
                                 self.acqthread_flushwfms(False)
                                 pass
+                            if err < 0:
+                                errmsg="Conversion Q CsDo(ACTION_ABORT)"
+                                continue # Break out and report error 
 
                             Quit=1
                             continue
@@ -796,10 +838,10 @@ cdef class CSLowLevel:
                 dg.dgm_AddMetaDatumWI(<dg.dg_wfminfo *>self.Target[ChannelIndex],dg.dgm_CreateMetaDatumStr("Coord1","Time"))
                 dg.dgm_AddMetaDatumWI(<dg.dg_wfminfo *>self.Target[ChannelIndex],dg.dgm_CreateMetaDatumStr("Units1","seconds"))
                 dg.dgm_AddMetaDatumWI(<dg.dg_wfminfo *>self.Target[ChannelIndex],dg.dgm_CreateMetaDatumDbl("IniVal1",-self.PreTriggerSamples*1.0/self.SampleRate))
-                dg.dgm_AddMetaDatumWI(<dg.dg_wfminfo *>self.Target[ChannelIndex],dg.dgm_CreateMetaDatumDbl("Step1",-1.0/self.SampleRate))
-                if self.calcsync:
-                    dg.dgm_AddMetaDatumWI(<dg.dg_wfminfo *>Target[ChannelIndex],dg.dgm_CreateMetaDatumInt("CalcSync",1))
-                    pass
+                dg.dgm_AddMetaDatumWI(<dg.dg_wfminfo *>self.Target[ChannelIndex],dg.dgm_CreateMetaDatumDbl("Step1",1.0/self.SampleRate))
+                #if self.calcsync:
+                #    dg.dgm_AddMetaDatumWI(<dg.dg_wfminfo *>Target[ChannelIndex],dg.dgm_CreateMetaDatumInt("CalcSync",1))
+                #    pass
                 #if ConvWarnFlag[ChannelIndex]:
                 #    dg.dgm_AddMetaDatumWI(<dg.dg_wfminfo *>self.Target[ChannelIndex],dg.dgm_CreateMetaDatumStr("Warning","OVER"))
                 #    pass

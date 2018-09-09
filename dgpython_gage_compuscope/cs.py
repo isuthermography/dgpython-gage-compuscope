@@ -8,6 +8,7 @@ from dataguzzler_python.pydg import Module as pydg_Module
 from dataguzzler_python.pydg import CurContext
 from dataguzzler_python.pydg import RunInContext
 from dataguzzler_python.pydg import u # PINT unit registry
+from dataguzzler_python import pydg
 
 from . import gageconstants as gc
 import numpy as np
@@ -171,7 +172,38 @@ class ParamAttribute(object):
     pass
     
 
+def add_CS_descriptors(cls):
+    AcqParamDict={ ParamName: ParamVal for (ParamName,ParamVal) in ParamDict.items() if ParamVal[0]=="ACQ"}
+    TrigParamDict={ ParamName: ParamVal for (ParamName,ParamVal) in ParamDict.items() if ParamVal[0]=="TRIG"}
+    ChanParamDict={ ParamName: ParamVal for (ParamName,ParamVal) in ParamDict.items() if ParamVal[0]=="CHAN"}
 
+    for paramname in AcqParamDict:            
+        # Create Descriptor for this parameter -- this is so help() works.
+        
+        descr = ParamAttribute(paramname,1,ParamDict[paramname][4])
+        # Need to manually wrap the descriptor because pydg.Module
+        # can't otherwise control descriptor access -- 
+        # because the descriptor is called within object.__getattribute__()
+        setattr(cls,paramname,pydg.wrapdescriptor(descr))        
+        pass
+
+    for paramname in ChanParamDict:            
+        # Create Descriptor for this parameter -- this is primarily so help() works, N equivalent to 1... additional copies for N>1 added by constructor
+        descr = ParamAttribute(paramname,1,ParamDict[paramname][4])
+        setattr(cls,paramname,pydg.wrapdescriptor(descr))        
+        setattr(cls,paramname+"N",pydg.wrapdescriptor(descr))        
+        pass
+
+    for paramname in TrigParamDict:            
+        # Create Descriptor for this parameter -- this is primarily so help() works, N equivalent to 1... additional copies for N>1 added by constructor
+        descr = ParamAttribute(paramname,1,ParamDict[paramname][4])
+        setattr(cls,paramname,pydg.wrapdescriptor(descr))        
+        setattr(cls,paramname+"N",pydg.wrapdescriptor(descr))        
+        pass
+    return cls
+
+
+@add_CS_descriptors
 class CompuScope(object,metaclass=pydg_Module):
     # pydg_Module ensures that all calls to this are within the same thread
     LowLevel=None
@@ -201,16 +233,33 @@ class CompuScope(object,metaclass=pydg_Module):
 
         self.LowLevel.StartAcqThread()
 
-        for paramname in self.get_all_params:
-            
-            # Create Descriptor for this parameter
-            descr = ParamAttribute(name,trailingindex,ParamDict[name][4])
-            self.__dict__[paramname] = descr
+        TrigCount=self.LowLevel.SysInfo[0]["TriggerMachinesCount"]
+        ChanCount=self.LowLevel.SysInfo[0]["ChannelCount"]
 
+        TrigParamDict={ ParamName: ParamVal for (ParamName,ParamVal) in ParamDict.items() if ParamVal[0]=="TRIG"}
+        ChanParamDict={ ParamName: ParamVal for (ParamName,ParamVal) in ParamDict.items() if ParamVal[0]=="CHAN"}
+
+
+        # Create descriptors for channels > 1
+        for paramname in ChanParamDict:
+            for Cnt in range(1,ChanCount):
+                # Create Descriptor for this parameter
+                descr = ParamAttribute(paramname,Cnt+1,ParamDict[paramname][4])
+                self.__dict__["%s%d" % (paramname,Cnt+1)] = pydg.wrapdescriptor(descr)
+                pass
+            pass
+
+        # Create descriptors for trigger units > 1
+        for paramname in TrigParamDict:
+            for Cnt in range(1,TrigCount):
+                # Create Descriptor for this parameter
+                descr = ParamAttribute(paramname,Cnt+1,ParamDict[paramname][4])
+                self.__dict__["%s%d" % (paramname,Cnt+1)] = pydg.wrapdescriptor(descr)
+                pass
             pass
         
         pass
-
+    
     def update_dict(self,params):
         """ Assign multiple parameters as a single operation
         based on a dictionary """

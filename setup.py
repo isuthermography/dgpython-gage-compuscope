@@ -21,9 +21,9 @@ cs_lowlevel_ext.library_dirs.append("/usr/local/dataguzzler-lib/lib")
 cs_lowlevel_ext.library_dirs.append("/usr/local/dataguzzler/lib/dg_internal")
 cs_lowlevel_ext.library_dirs.append("/usr/local/include")
 cs_lowlevel_ext.libraries.extend([ "dg_internal", "dg_comm", "dataguzzler", "dg_units","CsSsm"])
-cs_lowlevel_ext.extra_link_args.extend(["-shared-libgcc","-lrt","-lgcc","-lpthread","-Wl,-rpath,/usr/local/dataguzzler/lib/dg_internal,-rpath,/usr/local/dataguzzler-lib/lib","-Xlinker","--export-dynamic"])
+cs_lowlevel_ext.extra_link_args.extend(["-g","-shared-libgcc","-lrt","-lgcc","-lpthread","-Wl,-rpath,/usr/local/dataguzzler/lib/dg_internal,-rpath,/usr/local/dataguzzler-lib/lib","-Xlinker","--export-dynamic"])
 
-cs_lowlevel_ext.extra_compile_args.extend([])
+cs_lowlevel_ext.extra_compile_args.extend(["-g","-O0"])
 
 numpy_setup(name="dgpython_gage_compuscope",
             description="GAGE CompuScope module for dgpython",
