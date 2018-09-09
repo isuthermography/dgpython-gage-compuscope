@@ -3,18 +3,19 @@ import os
 import numpy as np
 import signal
 
-from limatix.dc_value import numericunitsvalue as nuv
 
 
 # Receiving signals makes CompuScope library malfunction, so block them from the thread for this Module
 signal.pthread_sigmask(signal.SIG_BLOCK,(signal.SIGFPE,signal.SIGCHLD))
 
-# Temporary hack until all needed symbols are in a separate dll...
-sys.setdlopenflags(os.RTLD_GLOBAL|os.RTLD_NOW)
+## Temporary hack until all needed symbols are in a separate dll...
+#sys.setdlopenflags(os.RTLD_GLOBAL|os.RTLD_NOW)
 
 from dataguzzler_python import dgpy
 from dataguzzler_python.dgpy import u
+from dataguzzler_python.dgpy import check_dgpython
 
+check_dgpython()
 
 from dataguzzler_python import dgold
 from dataguzzler_python.dgold import cmd as dgcmd
