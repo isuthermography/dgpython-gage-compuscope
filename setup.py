@@ -9,7 +9,7 @@ import dataguzzler_python
 #  * Must install GAGE sdk and copy contents of its Include/Public directory
 #    into /usr/local/include/
 
-ext_modules=cythonize("dgpython_gage_compuscope/*.pyx")
+ext_modules=cythonize(["dgpython_gage_compuscope/*.pyx"])  #"dgpython_gage_compuscope/*.pxd", 
 
 emdict=dict([ (module.name,module) for module in ext_modules])
 cs_lowlevel_ext = emdict["dgpython_gage_compuscope.cs_lowlevel"]
@@ -17,11 +17,13 @@ cs_lowlevel_ext.include_dirs.append(np.get_include())
 cs_lowlevel_ext.include_dirs.append("/usr/local/dataguzzler-lib/include")
 cs_lowlevel_ext.include_dirs.append("/usr/local/dataguzzler/include")
 cs_lowlevel_ext.include_dirs.append(os.path.split(dataguzzler_python.__file__)[0])
+cs_lowlevel_ext.include_dirs.append(r"C:\Users\tylerl\Anaconda3\Library\include")
 cs_lowlevel_ext.library_dirs.append("/usr/local/dataguzzler-lib/lib")
 cs_lowlevel_ext.library_dirs.append("/usr/local/dataguzzler/lib/dg_internal")
 cs_lowlevel_ext.library_dirs.append("/usr/local/include")
-cs_lowlevel_ext.libraries.extend([ "dg_internal", "dg_comm", "dataguzzler", "dg_units","CsSsm"])
-cs_lowlevel_ext.extra_link_args.extend(["-g","-shared-libgcc","-lrt","-lgcc","-lpthread","-Wl,-rpath,/usr/local/dataguzzler/lib/dg_internal,-rpath,/usr/local/dataguzzler-lib/lib","-Xlinker","--export-dynamic"])
+cs_lowlevel_ext.library_dirs.append(r"C:\Users\tylerl\Anaconda3\Library\lib")
+cs_lowlevel_ext.libraries.extend(["CsSsm"])
+cs_lowlevel_ext.extra_link_args.extend(["-g","-shared-libgcc","-lrt","-lgcc","-lpthread","-Xlinker","--export-dynamic"])
 
 cs_lowlevel_ext.extra_compile_args.extend(["-g","-O0"])
 

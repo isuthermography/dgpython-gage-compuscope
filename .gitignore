@@ -4,3 +4,6 @@ build/
 __pycache__
 *.pyc
 dgpython_gage_compuscope/cs_lowlevel.c
+.vscode
+dist/
+*.egg-info

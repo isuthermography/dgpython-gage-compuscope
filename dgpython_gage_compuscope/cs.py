@@ -7,11 +7,13 @@ from threading import Thread
 from dataguzzler_python.dgpy import Module as dgpy_Module
 from dataguzzler_python.dgpy import CurContext
 from dataguzzler_python.dgpy import RunInContext
-from dataguzzler_python.dgpy import u # PINT unit registry
 from dataguzzler_python import dgpy
 
 from . import gageconstants as gc
 import numpy as np
+
+import pint
+u = pint.get_application_registry()
 
 from .cs_lowlevel import CSLowLevel
 
@@ -97,6 +99,7 @@ ParamDict={
     "TriggerHoldoff": ("ACQ", np.int64, lambda val: val, lambda num: np.int64(num),"Number of samples to acquire before enabling trigger circuitry, i.e. pretrigger amount"),
     "SampleOffset": ("ACQ", np.int32, lambda val: val, lambda num: np.int32(num),"System sample offset"),
     "TimeStampConfig": ("ACQ", np.uint32, lambda num: PrintMode(num,TimeStampModeStrs_array), lambda  m: ParseMode(m,TimeStampModeStrs,TimeStampModeStrs_array),"Time stamp mode bits, selected from %s" % (TimeStampModeStrs_array[TimeStampModeStrs_array != None])),
+    "SegmentCountHigh": ("ACQ", np.int32, lambda val: val, lambda num: np.int32(num),"High Part of 64-bit segment count. Number of segments for acquisition"),
     # !!!*** Need to do rest of parameters here !!!***
     # i.e Channel (CHAN) paramters and trigger (TRIG) parameters
 
@@ -207,9 +210,11 @@ def add_CS_descriptors(cls):
 class CompuScope(object,metaclass=dgpy_Module):
     # dgpy_Module ensures that all calls to this are within the same thread
     LowLevel=None
+    module_name=None
+    recdb=None
         
     
-    def __init__(self,boardtype,numchannels,samplebits,index,**params):
+    def __init__(self,module_name,recdb,boardtype,numchannels,samplebits,index,**params):
         """ Create a CompuScope object for a specified
         CompuScope system. The system is specified by 
         board type (see BOARDTYPE defines in gageconstants.py)
@@ -226,12 +231,18 @@ class CompuScope(object,metaclass=dgpy_Module):
 """
 
         #assert(sizeof(TCHAR)==1)
+        self.module_name = module_name
+        self.recdb = recdb
 
-        self.LowLevel=CSLowLevel(ParamDict,boardtype,numchannels,samplebits,index)
+        self.LowLevel=CSLowLevel(self.module_name,self.recdb,self,ParamDict,boardtype,numchannels,samplebits,index)
         
         self.update(**params)
 
+        print(self.queryall())
+
         self.LowLevel.StartAcqThread()
+
+        print("Thread Running")
 
         TrigCount=self.LowLevel.SysInfo[0]["TriggerMachinesCount"]
         ChanCount=self.LowLevel.SysInfo[0]["ChannelCount"]
@@ -257,6 +268,8 @@ class CompuScope(object,metaclass=dgpy_Module):
                 self.__dict__["%s%d" % (paramname,Cnt+1)] = descr
                 pass
             pass
+
+        print("Finished startup")
         
         pass
     
