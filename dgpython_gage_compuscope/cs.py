@@ -9,7 +9,7 @@ from dataguzzler_python.dgpy import CurContext
 from dataguzzler_python.dgpy import RunInContext
 from dataguzzler_python import dgpy
 
-from . import gageconstants as gc
+from . import gc
 import numpy as np
 
 import pint
@@ -157,15 +157,15 @@ class ParamAttribute(object):
             
 
     def __set__(self,obj,value):
-        sys.stderr.write("StartParamTransaction()\n")
-        sys.stderr.flush()
+        #sys.stderr.write("StartParamTransaction()\n")
+        #sys.stderr.flush()
         obj.LowLevel.StartParamTransaction()
         try:
-            sys.stderr.write("SetParam()\n")
-            sys.stderr.flush()
+            #sys.stderr.write("SetParam()\n")
+            #sys.stderr.flush()
             obj.LowLevel.SetParam(self.Name,self.trailingindex,value)
-            sys.stderr.write("Commit()\n")
-            sys.stderr.flush()
+            #sys.stderr.write("Commit()\n")
+            #sys.stderr.flush()
             obj.LowLevel.CommitParamTransaction()
             pass
         except:
@@ -238,11 +238,11 @@ class CompuScope(object,metaclass=dgpy_Module):
         
         self.update(**params)
 
-        print(self.queryall())
+        #print(self.queryall())
 
         self.LowLevel.StartAcqThread()
 
-        print("Thread Running")
+        #print("Thread Running")
 
         TrigCount=self.LowLevel.SysInfo[0]["TriggerMachinesCount"]
         ChanCount=self.LowLevel.SysInfo[0]["ChannelCount"]
@@ -269,7 +269,7 @@ class CompuScope(object,metaclass=dgpy_Module):
                 pass
             pass
 
-        print("Finished startup")
+        #print("Finished startup")
         
         pass
     

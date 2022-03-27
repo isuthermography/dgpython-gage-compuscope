@@ -9,11 +9,7 @@ import spatialnde2 as snde
 
 include(snde,"recdb_gui.dpi")
 
-
 from dgpython_gage_compuscope.cs import CompuScope
 from dgpython_gage_compuscope import gageconstants as gc
-
-
-
 
 CS=CompuScope("CS",recdb,0,0,0,0, Mode="DUAL")

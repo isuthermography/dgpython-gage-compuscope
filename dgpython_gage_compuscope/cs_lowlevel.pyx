@@ -18,6 +18,7 @@ import traceback
 from threading import Thread
 import time
 
+
 import spatialnde2 as snde
 
 from dataguzzler_python.dgpy import Module as dgpy_Module
@@ -28,7 +29,7 @@ from dataguzzler_python.dgpy import RunInContext
 ###from dataguzzler_python cimport dg_internal
 
 
-from . import gageconstants as gc
+from . import gc
 #import pint # units library
 
 from libc.stdio cimport fprintf,stderr
@@ -275,19 +276,19 @@ cdef class CSLowLevel:
     # while GIL is held
     ###cdef wfmstore.Channel **Channel
     cdef void **CurChanDataPtrs # Array of target waveforms for acquisition thread -- valid only while acquiring
-    cpdef int64_t PreTriggerSamples
-    cpdef int64_t Length
-    cpdef int64_t StartAddress
+    cdef int64_t PreTriggerSamples
+    cdef int64_t Length
+    cdef int64_t StartAddress
     cdef void **RawBuffers # Array of buffer pointers
-    cpdef int32_t ChannelCount # Total number of available channels
-    cpdef int32_t ChannelIncrement # Step size between channels
-    cpdef uint32_t *InputRange
-    cpdef uint32_t SampleSize
-    cpdef uint32_t SampleRate
-    cpdef int32_t SampleOffsetInQuantSteps # i32SampleOffset... Should be corresponding to the top of the detectable voltage range
-    cpdef int32_t SampleResolution # Number of quantization in positive half of measurement range.... i.e. 10 bits -> 1024 steps total -> SampleResolution = 512 steps
-    cpdef int32_t *DcOffset # Array of dc offsets in mV
-    cpdef double *ProbeAtten
+    cdef int32_t ChannelCount # Total number of available channels
+    cdef int32_t ChannelIncrement # Step size between channels
+    cdef uint32_t *InputRange
+    cdef uint32_t SampleSize
+    cdef uint32_t SampleRate
+    cdef int32_t SampleOffsetInQuantSteps # i32SampleOffset... Should be corresponding to the top of the detectable voltage range
+    cdef int32_t SampleResolution # Number of quantization in positive half of measurement range.... i.e. 10 bits -> 1024 steps total -> SampleResolution = 512 steps
+    cdef int32_t *DcOffset # Array of dc offsets in mV
+    cdef double *ProbeAtten
     cdef int64_t lastglobalrev
     
     
@@ -306,11 +307,11 @@ cdef class CSLowLevel:
         self.AcquisitionThread=None
         self.selfptr = selfptr
 
-        sys.stderr.write("Calling CsInitialize()\n")
-        sys.stderr.flush()
+        #("Calling CsInitialize()\n")
+        #sys.stderr.flush()
         err=CsInitialize()
-        sys.stderr.write("Called CsInitialize()\n")
-        sys.stderr.flush()
+        #sys.stderr.write("Called CsInitialize()\n")
+        #sys.stderr.flush()
         if err < 0:
             raise CSError("CsInitialize()",err)
         
@@ -362,8 +363,8 @@ cdef class CSLowLevel:
         # Set acquisition thread going
         self.AcquisitionThread = Thread(target=self.AcquisitionThreadCode,daemon=True)
         self.AcquisitionThread.start()
-        sys.stderr.write("AcquisitionThread started\n")
-        sys.stderr.flush()
+        #sys.stderr.write("AcquisitionThread started\n")
+        #sys.stderr.flush()
 
         # Start data acquisition
         err=CsDo(self.System,gc.ACTION_START)
@@ -418,8 +419,8 @@ cdef class CSLowLevel:
 
 
         # Write 'A' for abort
-        sys.stderr.write("Writing 'A'\n")
-        sys.stderr.flush()
+        #sys.stderr.write("Writing 'A'\n")
+        #sys.stderr.flush()
         ctrlbyte='A'
         err=EAGAIN
         while err==EAGAIN or err==EINTR:
@@ -432,29 +433,29 @@ cdef class CSLowLevel:
                 raise Exception('Failed to Send Event Siganl %#010x\n' % GetLastError())
 
         # Wait for response of 'S' for stopped
-        sys.stderr.write("Waiting for 'S'\n")
-        sys.stderr.flush()
+        #sys.stderr.write("Waiting for 'S'\n")
+        #sys.stderr.flush()
 
         IF UNAME_SYSNAME == "Windows":
             while WaitForSingleObject(self.hEventWorkerDone, 0) != WAIT_OBJECT_0:
                 # THIS MUST BE HERE OR WE WILL GET STUCK BECAUSE PYTHON IS BEING BLOCKED
                 time.sleep(0.1)
-            sys.stderr.write("Got Event Back\n")
-            sys.stderr.flush()
+            #sys.stderr.write("Got Event Back\n")
+            #sys.stderr.flush()
 
         # Start data acquisition
-        sys.stderr.write("Getting ready to abort\n")
-        sys.stderr.flush()
+        #sys.stderr.write("Getting ready to abort\n")
+        #sys.stderr.flush()
         err=CsDo(self.System,gc.ACTION_ABORT)
         if err < 0:
             raise CSError("CsDo(ACTION_ABORT)",err)
 
-        sys.stderr.write("Aborted\n")
-        sys.stderr.flush()
+        #sys.stderr.write("Aborted\n")
+        #sys.stderr.flush()
 
         while ctrlbyte != 'S': 
-            sys.stderr.write('Loop\n')
-            sys.stderr.flush()
+            #sys.stderr.write('Loop\n')
+            #sys.stderr.flush()
             err=EAGAIN
             while err==EAGAIN or err==EINTR:
                 nbytes=read(self.pipe_fd_acqresp[0],&ctrlbyte,1)
@@ -502,9 +503,9 @@ cdef class CSLowLevel:
         transact = self.recdb.start_transaction()
         try:
             while len(self.result_channel_ptrs) < NumAcqChannels:
-                channame = ("CH%d" % (len(self.result_channel_ptrs) + 1)).encode('utf-8')
-                sys.stderr.write('Creating Channel %s' % (channame))
-                sys.stderr.flush()
+                channame = ("/%s/CH%d" % (self.module_name, len(self.result_channel_ptrs) + 1))
+                #sys.stderr.write('Creating Channel %s' % (channame))
+                #sys.stderr.flush()
                 self.result_channel_ptrs[channame] = self.recdb.define_channel(str(channame), "main", self.recdb.raw())
         except:
             raise
@@ -639,7 +640,7 @@ cdef class CSLowLevel:
         cdef ssize_t nbytes
         cdef char ctrlbyte=0
 
-        fprintf(stderr,"acqthread_recv_cmd()\n");
+        #fprintf(stderr,"acqthread_recv_cmd()\n");
         err=EAGAIN
         while err==EAGAIN or err==EINTR:
             nbytes=read(self.pipe_fd_acqctrl[0],&ctrlbyte,1)
@@ -650,7 +651,7 @@ cdef class CSLowLevel:
                 err=0
                 pass
             pass
-        fprintf(stderr,"acqthread_recv_cmd() err=%d nbytes=%d returning %d\n",<int>err,<int>nbytes,<int>ctrlbyte);
+        #fprintf(stderr,"acqthread_recv_cmd() err=%d nbytes=%d returning %d\n",<int>err,<int>nbytes,<int>ctrlbyte);
         err=EAGAIN
         if nbytes != 1:
             # Treat error or EOF as quit command
@@ -664,7 +665,7 @@ cdef class CSLowLevel:
         IF UNAME_SYSNAME == "Windows":
             cdef unsigned long dwWaitRet = 0            
 
-        fprintf(stderr,"acqthread_wait_for_ok()\n")
+        #fprintf(stderr,"acqthread_wait_for_ok()\n")
 
         # Write 'S' for stopped
         ctrlbyte='S'
@@ -684,12 +685,12 @@ cdef class CSLowLevel:
             if SetEvent(self.hEventWorkerDone) == 0:
                 raise Exception('Worker Failed to Send Done Siganl %#010x\n' % GetLastError())
 
-        fprintf(stderr,"Waiting for 'G'\n")
+        #fprintf(stderr,"Waiting for 'G'\n")
 
         IF UNAME_SYSNAME == "Windows":
             while WaitForSingleObject(self.hEventWorkerInterrupted, 0) != WAIT_OBJECT_0:
                 pass
-            fprintf(stderr, "Got Event Back\n")
+            #fprintf(stderr, "Got Event Back\n")
 
         # Wait for response of 'G'
         while ctrlbyte != 'G': # G for go
@@ -707,7 +708,7 @@ cdef class CSLowLevel:
                 # Treat error or EOF as quit command
                 return 'Q'
             pass
-        fprintf(stderr,"acqthread_wait_for_ok() done.\n")
+        #fprintf(stderr,"acqthread_wait_for_ok() done.\n")
 
         return ctrlbyte
     
@@ -749,8 +750,8 @@ cdef class CSLowLevel:
         cdef IN_PARAMS_TRANSFERDATA InParams
         cdef OUT_PARAMS_TRANSFERDATA OutParams
         
-        sys.stderr.write("AcquisitionThread: start\n")
-        sys.stderr.flush()
+        #sys.stderr.write("AcquisitionThread: start\n")
+        #sys.stderr.flush()
 
         IF UNAME_SYSNAME == "Windows":
             pollfds[0] = self.fd_end_acq_read
@@ -786,8 +787,8 @@ cdef class CSLowLevel:
             err=0
             errmsg=""
 
-            sys.stderr.write('1\n')
-            sys.stderr.flush()
+            #sys.stderr.write('1\n')
+            #sys.stderr.flush()
 
             InParams.i64StartAddress=self.StartAddress
             InParams.i64Length=self.Length
@@ -805,17 +806,17 @@ cdef class CSLowLevel:
             SampleSize=self.SampleSize
             ProbeAtten=self.ProbeAtten
         
-            sys.stderr.write('2\n')
-            sys.stderr.flush()
+            #sys.stderr.write('2\n')
+            #sys.stderr.flush()
             # Create Entry
             recptrs = []
             transact = self.recdb.start_transaction()
-            sys.stderr.write('3\n')
-            sys.stderr.flush()
+            #sys.stderr.write('3\n')
+            #sys.stderr.flush()
             try:
                 for name, ptr in self.result_channel_ptrs.items():
-                    sys.stderr.write('4\n')
-                    sys.stderr.flush()
+                    #sys.stderr.write('4\n')
+                    #sys.stderr.flush()
                     recptr = snde.create_recording_ref(self.recdb, ptr, self.recdb.raw(), snde.SNDE_RTN_FLOAT64)
                     recptr.allocate_storage([Length], False)
                     recptrs.append(recptr)
@@ -824,13 +825,13 @@ cdef class CSLowLevel:
             except:
                 raise
             finally:
-                sys.stderr.write('5\n')
-                sys.stderr.flush()
+                #sys.stderr.write('5\n')
+                #sys.stderr.flush()
                 globalrev = transact.end_transaction()
             
             for ChannelIndex in range(self.ChannelCount//self.ChannelIncrement):
-                sys.stderr.write('6\n')
-                sys.stderr.flush()
+                #sys.stderr.write('6\n')
+                #sys.stderr.flush()
                 CurChanDataPtrs[ChannelIndex] = <void*>(<uintptr_t>recptrs[ChannelIndex].void_shifted_arrayptr())
                 pass
 
@@ -841,7 +842,7 @@ cdef class CSLowLevel:
                 #if err < 0:
                 #    errmsg="CsDo(ACTION_START)"
                 #    continue # Break out and report error 
-                fprintf(stderr,'7\n')
+                #fprintf(stderr,'7\n')
                 IF UNAME_SYSNAME == "Windows":
                     # NOTE: For win32 need to use WaitForSingleObject... See Gage Evetns.c/Threads.c example
                     dwWaitRet = WaitForMultipleObjects(2, pollfds, False, INFINITE)
@@ -853,14 +854,14 @@ cdef class CSLowLevel:
                     poll(pollfds,2,-1)
                     polleval = pollfds[1].revents & POLLIN                    
 
-                fprintf(stderr, 'WaitForMultipleObjects: %#010x\n', dwWaitRet)
-                fprintf(stderr, 'Error:  %#010x\n', GetLastError())
-                fprintf(stderr,'8\n')
+                #fprintf(stderr, 'WaitForMultipleObjects: %#010x\n', dwWaitRet)
+                #fprintf(stderr, 'Error:  %#010x\n', GetLastError())
+                #fprintf(stderr,'8\n')
                 if polleval:
                     acqcmd=self.acqthread_recv_cmd()
-                    fprintf(stderr, "Made it back3\n")
+                    #fprintf(stderr, "Made it back3\n")
                     if acqcmd=='A': # abort
-                        fprintf(stderr, "Aborting\n")
+                        #fprintf(stderr, "Aborting\n")
                         #err=CsDo(self.System,ACTION_ABORT)
                         #if err < 0:
                         #    errmsg="A CsDo(ACTION_ABORT)"
@@ -873,7 +874,7 @@ cdef class CSLowLevel:
                         self.acqthread_wait_for_ok() # report we are stopped. Wait for the goahead to continue
                         continue
                     if acqcmd=='Q': # quit
-                        fprintf(stderr, "Quitting\n")
+                        #fprintf(stderr, "Quitting\n")
                         #err=CsDo(self.System,ACTION_ABORT)
                         #if err < 0:
                         #    errmsg="Q CsDo(ACTION_ABORT)"
@@ -887,7 +888,7 @@ cdef class CSLowLevel:
                         continue
                     pass
 
-                fprintf(stderr,'9\n')
+                #fprintf(stderr,'9\n')
                 IF UNAME_SYSNAME == "Windows":
                     polleval = dwWaitRet == WAIT_OBJECT_0
                 ELSE:
@@ -903,7 +904,7 @@ cdef class CSLowLevel:
                             recptr.rec.mark_as_ready()
                     continue
 
-                fprintf(stderr,'10\n')
+                #fprintf(stderr,'10\n')
                 # read byte indicating termination of acquisition
                 IF not UNAME_SYSNAME == "Windows":
                     rderr=EAGAIN
@@ -917,13 +918,13 @@ cdef class CSLowLevel:
                             pass
                         pass
                     
-                fprintf(stderr,'11\n')
+                #fprintf(stderr,'11\n')
                 for ChannelIndex in range(NumAcqChannels): #range(1,self.ChannelCount+1,self.ChannelIncrement):
                     if err != 0:
                         continue  # raise any abort
                     
                     # Check for abort
-                    fprintf(stderr,'12\n')
+                    #fprintf(stderr,'12\n')
 
                     IF UNAME_SYSNAME == "Windows":
                         # NOTE: For win32 need to use WaitForSingleObject... See Gage Evetns.c/Threads.c example
@@ -936,9 +937,9 @@ cdef class CSLowLevel:
 
                     if polleval:
                         acqcmd=self.acqthread_recv_cmd()
-                        fprintf(stderr, "Made it back2\n")
+                        #fprintf(stderr, "Made it back2\n")
                         if acqcmd=='A': # abort
-                            fprintf(stderr, "Aborting\n")
+                            #fprintf(stderr, "Aborting\n")
                             #err=CsDo(self.System,ACTION_ABORT)
                             #if err < 0:
                             #    errmsg="CSTransfer A CsDo(ACTION_ABORT)"
@@ -951,7 +952,7 @@ cdef class CSLowLevel:
                             self.acqthread_wait_for_ok() # report we are stopped. Wait for the goahead to continue
                             continue
                         if acqcmd=='Q': # quit
-                            fprintf(stderr, "Quitting\n")
+                            #fprintf(stderr, "Quitting\n")
                             #err=CsDo(self.System,ACTION_ABORT)
                             #if err < 0:
                             #    errmsg="CSTransfer Q CsDo(ACTION_ABORT)"
@@ -964,7 +965,7 @@ cdef class CSLowLevel:
                             Quit=1
                             continue
                         pass
-                    fprintf(stderr,'13\n')
+                    #fprintf(stderr,'13\n')
                     InParams.u16Channel=1+ChannelIndex*ChannelIncrement
                     InParams.pDataBuffer=RawBuffers[ChannelIndex]
                     err=CsTransfer(self.System,&InParams,&OutParams)
@@ -979,7 +980,7 @@ cdef class CSLowLevel:
                     
                     pass
 
-                    fprintf(stderr,'14\n')
+                    #fprintf(stderr,'14\n')
 
                 #dgold.dg_enter_main_context_c()
 
@@ -992,7 +993,7 @@ cdef class CSLowLevel:
                 #dgold.dg_leave_main_context_c()
 
                 # Now do the conversions
-                fprintf(stderr,'15\n')
+                #fprintf(stderr,'15\n')
                 for ChannelIndex in range(ChannelCount//ChannelIncrement):
                     # Check for abort
                     IF UNAME_SYSNAME == "Windows":
@@ -1004,9 +1005,9 @@ cdef class CSLowLevel:
                         polleval = pollfds[1].revents & POLLIN   
                     if polleval:
                         acqcmd=self.acqthread_recv_cmd()
-                        fprintf(stderr, "Made it back1\n")
+                        #fprintf(stderr, "Made it back1\n")
                         if acqcmd=='A': # abort
-                            fprintf(stderr, "Aborting\n")
+                            #fprintf(stderr, "Aborting\n")
                             #err=CsDo(self.System,ACTION_ABORT)
                             ###with gil:
                             ###    self.acqthread_flushwfms(False)
@@ -1022,7 +1023,7 @@ cdef class CSLowLevel:
                             self.acqthread_wait_for_ok() # report we are stopped. Wait for the goahead to continue
                             continue
                         if acqcmd=='Q': # quit
-                            fprintf(stderr, "Quitting\n")
+                            #fprintf(stderr, "Quitting\n")
                             #err=CsDo(self.System,ACTION_ABORT)
                             ###with gil:
                             ###    self.acqthread_flushwfms(False)
@@ -1038,7 +1039,7 @@ cdef class CSLowLevel:
                             Quit=1
                             continue
                         pass
-                    fprintf(stderr,'16\n')
+                    #fprintf(stderr,'16\n')
                     #### TODO: Correct to use actual data
                     self.ConvertChannelToVoltage(RawBuffers[ChannelIndex],CurChanDataPtrs[ChannelIndex],ChannelIndex,SampleSize,InputRange[ChannelIndex],SampleOffsetInQuantSteps,SampleResolution,DcOffset[ChannelIndex],Length)
                     pass
@@ -1052,15 +1053,15 @@ cdef class CSLowLevel:
             # Now get metadata ***!!!! (NEED TO IMPLEMENT)
 
             # ...
-            sys.stderr.write('17\n')
-            sys.stderr.flush()
+            #sys.stderr.write('17\n')
+            #sys.stderr.flush()
             #### TODO -- Replace this with new metadata stuff
             for recptr in recptrs:
                 recptr.rec.metadata = snde.immutable_metadata()
                 recptr.rec.mark_metadata_done()
                 recptr.rec.mark_as_ready()
-                sys.stderr.write('18\n')
-                sys.stderr.flush()
+                #sys.stderr.write('18\n')
+                #sys.stderr.flush()
             #for ChannelIndex in range(ChannelCount//ChannelIncrement):
             #    dg.dgm_AddMetaDatumWI(<dg.dg_wfminfo *>self.Target[ChannelIndex],dg.dgm_CreateMetaDatumInt("Channel",1+ChannelIndex*(ChannelCount//ChannelIncrement)))
             #    dg.dgm_AddMetaDatumWI(<dg.dg_wfminfo *>self.Target[ChannelIndex],dg.dgm_CreateMetaDatumDbl("ProbeAtten",self.ProbeAtten[ChannelIndex]))
@@ -1083,8 +1084,8 @@ cdef class CSLowLevel:
             # Now, if CalcSync, Wait for math.  ***!!!!!
 
             # Need wrapper for waitglobalrevcomputation!!!***
-            sys.stderr.write('19\n')
-            sys.stderr.flush()
+            #sys.stderr.write('19\n')
+            #sys.stderr.flush()
             globalrev.wait_complete()
             #time.sleep(10)
         
@@ -1131,8 +1132,8 @@ cdef class CSLowLevel:
         if err < 0:
             raise CSError("CsGetSystemInfo()",err)
 
-        print("Got SysInfo: %s" % (str(SysInfo)))
-        print("self.System: "+str(self.System))
+        #print("Got SysInfo: %s" % (str(SysInfo)))
+        #print("self.System: "+str(self.System))
         return SysInfo
     
     
@@ -1189,12 +1190,12 @@ cdef class CSLowLevel:
                     raise CSError("CsGet()",err)
                 ChannelArray[0]["Channel"][cnt]=ChannelArrayEntry
                 pass
-            print("ChannelArray: "+str(ChannelArray))
-            print("self.System: "+str(self.System))
+            #print("ChannelArray: "+str(ChannelArray))
+            #print("self.System: "+str(self.System))
             #err = CsGet(self.System,gc.CS_CHANNEL_ARRAY,gc.CS_CURRENT_CONFIGURATION,ChannelArray.data)
             #if err < 0:
             #    raise CSError("CsGet()",err)
-            print("ChannelArrayOut: "+str(ChannelArray))
+            #print("ChannelArrayOut: "+str(ChannelArray))
             self.ChannelConfig = ChannelArray
             self.ChannelConfig_modified = ChannelArray.copy()
             sys.stdout.flush()
@@ -1302,8 +1303,8 @@ cdef class CSLowLevel:
         pass
     
     def CommitParamTransaction(self):
-        sys.stderr.write('Running COMMIT\n')
-        sys.stderr.flush()
+        #sys.stderr.write('Running COMMIT\n')
+        #sys.stderr.flush()
         err = CsDo(self.System,gc.ACTION_COMMIT_COERCE)
         if err < 0:
             raise CSError("CsDo(ACTION_COMMIT_COERCE)",err)
